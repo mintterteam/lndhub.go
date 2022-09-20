@@ -11,6 +11,7 @@ import (
 	"github.com/getAlby/lndhub.go/lib/responses"
 	"github.com/getAlby/lndhub.go/lib/security"
 	"github.com/uptrace/bun"
+	passwordvalidator "github.com/wagslane/go-password-validator"
 )
 
 var (
@@ -43,6 +44,13 @@ func (svc *LndhubService) CreateUser(ctx context.Context, login, password, nickn
 			return nil, err
 		}
 		password = string(randPasswordBytes)
+	} else {
+		if svc.Config.MinPasswordEntropy > 0 {
+			entropy := passwordvalidator.GetEntropy(password)
+			if entropy < float64(svc.Config.MinPasswordEntropy) {
+				return nil, fmt.Errorf("password entropy is too low (%f), required is %d", entropy, svc.Config.MinPasswordEntropy)
+			}
+		}
 	}
 
 	user.Nickname = nickname
