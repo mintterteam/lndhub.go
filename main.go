@@ -101,6 +101,8 @@ func main() {
 	e.Validator = &lib.CustomValidator{Validator: validator.New()}
 
 	e.Use(middleware.Recover())
+
+	// Absolute limits
 	e.Use(middleware.BodyLimit("250K"))
 	e.Use(middleware.RateLimiter(middleware.NewRateLimiterMemoryStore(20)))
 
@@ -148,9 +150,9 @@ func main() {
 		InvoicePubSub:  service.NewPubsub(),
 	}
 
-	strictRateLimitMiddleware := createRateLimitMiddleware(c.StrictRateLimit, c.BurstRateLimit)
-	regularRateLimitMiddleware := createRateLimitMiddleware(c.DefaultRateLimit, c.BurstRateLimit)
-	secured := e.Group("", tokens.Middleware(c.JWTSecret), middleware.RateLimiter(middleware.NewRateLimiterMemoryStore(rate.Limit(c.DefaultRateLimit))))
+	strictRateLimitMiddleware := createRateLimitMiddleware(c.StrictRateLimitPerMin, c.StrictRateLimitPerSec)
+	regularRateLimitMiddleware := createRateLimitMiddleware(c.DefaultRateLimitPerMin, c.DefaultRateLimitPerSec)
+	secured := e.Group("", tokens.Middleware(c.JWTSecret), middleware.RateLimiter(middleware.NewRateLimiterMemoryStore(rate.Limit(c.DefaultRateLimitPerSec))))
 	securedWithStrictRateLimit := e.Group("", tokens.Middleware(c.JWTSecret), strictRateLimitMiddleware)
 	RegisterLegacyEndpoints(svc, e, secured, securedWithStrictRateLimit, strictRateLimitMiddleware)
 	RegisterV2Endpoints(svc, e, secured, securedWithStrictRateLimit, strictRateLimitMiddleware, regularRateLimitMiddleware, security.SignatureMiddleware())
@@ -216,10 +218,11 @@ func main() {
 
 }
 
-func createRateLimitMiddleware(seconds int, burst int) echo.MiddlewareFunc {
+func createRateLimitMiddleware(requests_per_minute int, requests_per_second int) echo.MiddlewareFunc {
 	config := middleware.RateLimiterMemoryStoreConfig{
-		Rate:  rate.Every(time.Duration(seconds) * time.Second),
-		Burst: burst,
+		Rate:      rate.Limit(float64(requests_per_minute) / 60),
+		Burst:     requests_per_second,
+		ExpiresIn: 1 * time.Minute,
 	}
 	return middleware.RateLimiter(middleware.NewRateLimiterMemoryStoreWithConfig(config))
 }

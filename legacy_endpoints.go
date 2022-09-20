@@ -16,7 +16,7 @@ func RegisterLegacyEndpoints(svc *service.LndhubService, e *echo.Echo, secured *
 	if svc.Config.AllowAccountCreation {
 		e.POST("/create", controllers.NewCreateUserController(svc).CreateUser, strictRateLimitMiddleware)
 	}
-	e.POST("/invoice/:user_login", controllers.NewInvoiceController(svc).Invoice, middleware.RateLimiter(middleware.NewRateLimiterMemoryStore(rate.Limit(svc.Config.DefaultRateLimit))))
+	e.POST("/invoice/:user_login", controllers.NewInvoiceController(svc).Invoice, middleware.RateLimiter(middleware.NewRateLimiterMemoryStore(rate.Limit(svc.Config.DefaultRateLimitPerSec))))
 
 	// Secured endpoints which require a Authorization token (JWT)
 	secured.POST("/addinvoice", controllers.NewAddInvoiceController(svc).AddInvoice)
