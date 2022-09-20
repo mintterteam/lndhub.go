@@ -101,6 +101,8 @@ func main() {
 	e.Validator = &lib.CustomValidator{Validator: validator.New()}
 
 	e.Use(middleware.Recover())
+
+	// Absolute limits
 	e.Use(middleware.BodyLimit("250K"))
 	e.Use(middleware.RateLimiter(middleware.NewRateLimiterMemoryStore(20)))
 
@@ -148,12 +150,13 @@ func main() {
 		InvoicePubSub:  service.NewPubsub(),
 	}
 
-	strictRateLimitMiddleware := createRateLimitMiddleware(c.StrictRateLimit, c.BurstRateLimit)
-	regularRateLimitMiddleware := createRateLimitMiddleware(c.DefaultRateLimit, c.BurstRateLimit)
-	secured := e.Group("", tokens.Middleware(c.JWTSecret), middleware.RateLimiter(middleware.NewRateLimiterMemoryStore(rate.Limit(c.DefaultRateLimit))))
-	securedWithStrictRateLimit := e.Group("", tokens.Middleware(c.JWTSecret), strictRateLimitMiddleware)
-	RegisterLegacyEndpoints(svc, e, secured, securedWithStrictRateLimit, strictRateLimitMiddleware)
-	RegisterV2Endpoints(svc, e, secured, securedWithStrictRateLimit, strictRateLimitMiddleware, regularRateLimitMiddleware, security.SignatureMiddleware())
+	strictRateLimitPerMinMW := createRateLimitMiddleware(c.StrictRateLimitPerMin, 1*time.Minute)
+	strictRateLimitPerSecMW := createRateLimitMiddleware(c.StrictRateLimitPerSec, 1*time.Second)
+	regularRateLimitPerMinMW := createRateLimitMiddleware(c.DefaultRateLimitPerMin, 1*time.Minute)
+	regularRateLimitPerSecMW := createRateLimitMiddleware(c.DefaultRateLimitPerSec, 1*time.Second)
+	tokenMW := tokens.Middleware(c.JWTSecret)
+	RegisterLegacyEndpoints(svc, e, tokenMW, strictRateLimitPerMinMW, strictRateLimitPerSecMW, regularRateLimitPerMinMW, regularRateLimitPerSecMW)
+	RegisterV2Endpoints(svc, e, tokenMW, strictRateLimitPerMinMW, strictRateLimitPerSecMW, regularRateLimitPerMinMW, regularRateLimitPerSecMW, security.SignatureMiddleware())
 
 	//invoice streaming
 	//Authentication should be done through the query param because this is a websocket
@@ -216,12 +219,23 @@ func main() {
 
 }
 
-func createRateLimitMiddleware(seconds int, burst int) echo.MiddlewareFunc {
-	config := middleware.RateLimiterMemoryStoreConfig{
-		Rate:  rate.Every(time.Duration(seconds) * time.Second),
-		Burst: burst,
+func createRateLimitMiddleware(requests int, interval time.Duration) echo.MiddlewareFunc {
+	config := middleware.RateLimiterConfig{
+		Store: middleware.NewRateLimiterMemoryStoreWithConfig(
+			middleware.RateLimiterMemoryStoreConfig{
+				Rate: rate.Limit(float64(requests) / interval.Seconds()),
+			},
+		),
+		DenyHandler: func(context echo.Context, identifier string, err error) error {
+			return &echo.HTTPError{
+				Code:     http.StatusTooManyRequests,
+				Message:  fmt.Sprintf("rate limit [%d/%s] exceeded", requests, interval.String()),
+				Internal: err,
+			}
+		},
 	}
-	return middleware.RateLimiter(middleware.NewRateLimiterMemoryStoreWithConfig(config))
+
+	return middleware.RateLimiterWithConfig(config)
 }
 
 func createCacheClient() *cache.Client {
