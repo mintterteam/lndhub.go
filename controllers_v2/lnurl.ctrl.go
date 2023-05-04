@@ -112,6 +112,10 @@ func (controller *InvoiceController) Lud6Invoice(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, responses.LnurlpBadArgumentsError)
 	}
 
+	if c.QueryParams().Has("source") {
+		paymentMeta.Source = c.QueryParam("source")
+	}
+
 	records, err := json.Marshal(paymentMeta)
 	if err != nil {
 		c.Logger().Debugf("Could not parse to json: %v", paymentMeta)
@@ -133,10 +137,6 @@ func (controller *InvoiceController) Lud6Invoice(c echo.Context) error {
 	if controller.svc.Config.MaxReceiveAmount > 0 && amt_msat/1000 > controller.svc.Config.MaxReceiveAmount {
 		c.Logger().Errorf("Provided amount [%v] exceeded max receive limit [%v]", amt_msat/1000, controller.svc.Config.MaxReceiveAmount)
 		return c.JSON(http.StatusBadRequest, responses.LnurlpBadArgumentsError)
-	}
-
-	if c.QueryParams().Has("source") {
-		paymentMeta.Source = c.QueryParam("source")
 	}
 
 	var descriptionhash_string string = ""
