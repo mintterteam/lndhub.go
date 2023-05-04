@@ -60,7 +60,9 @@ type LnurlpResponseBody struct {
 // @Security     OAuth2Password
 func (controller *InvoiceController) Lud6Invoice(c echo.Context) error {
 	// The user param could be userID (login) or a nickname (lnaddress)
-
+	c.Response().Header().Set("Access-Control-Allow-Origin", "*")
+	c.Response().Header().Set("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept")
+	c.Response().Header().Set("Access-Control-Allow-Methods", "OPTIONS, GET")
 	if !c.QueryParams().Has("user") {
 		c.Logger().Errorf("user mandatory param in query URL")
 		return c.JSON(http.StatusBadRequest, responses.LnurlpBadArgumentsError)
