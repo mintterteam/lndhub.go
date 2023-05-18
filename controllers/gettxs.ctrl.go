@@ -76,7 +76,7 @@ func (controller *GetTXSController) GetTXS(c echo.Context) error {
 func (controller *GetTXSController) GetUserInvoices(c echo.Context) error {
 	userId := c.Get("UserID").(int64)
 
-	invoices, err := controller.svc.InvoicesFor(c.Request().Context(), userId, common.InvoiceTypeIncoming)
+	invoices, err := controller.svc.InvoicesIncomingAndInternalFor(c.Request().Context(), userId)
 	if err != nil {
 		return err
 	}

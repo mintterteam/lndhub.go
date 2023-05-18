@@ -1,12 +1,8 @@
 package v2controllers
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
+	"fmt"
 	"net/http"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/getAlby/lndhub.go/common"
@@ -101,14 +97,18 @@ func (controller *InvoiceController) GetOutgoingInvoices(c echo.Context) error {
 func (controller *InvoiceController) GetIncomingInvoices(c echo.Context) error {
 	userId := c.Get("UserID").(int64)
 
-	invoices, err := controller.svc.InvoicesFor(c.Request().Context(), userId, common.InvoiceTypeIncoming)
+	invoices, err := controller.svc.InvoicesIncomingAndInternalFor(c.Request().Context(), userId)
 	if err != nil {
 		return err
 	}
 
-	response := make([]Invoice, len(invoices))
-	for i, invoice := range invoices {
-		response[i] = Invoice{
+	response := []Invoice{}
+	for _, invoice := range invoices {
+		// not allowing the to view open subinvoices because they cannot be externally settled.
+		if invoice.Type == common.InvoiceTypeSubinvoice && invoice.State != common.InvoiceStateSettled {
+			continue
+		}
+		response = append(response, Invoice{
 			PaymentHash:     invoice.RHash,
 			PaymentRequest:  invoice.PaymentRequest,
 			Description:     invoice.Memo,
@@ -124,7 +124,7 @@ func (controller *InvoiceController) GetIncomingInvoices(c echo.Context) error {
 			IsPaid:          invoice.State == common.InvoiceStateSettled,
 			Keysend:         invoice.Keysend,
 			CustomRecords:   invoice.DestinationCustomRecords,
-		}
+		})
 	}
 	return c.JSON(http.StatusOK, &GetInvoicesResponseBody{Invoices: response})
 }
@@ -135,6 +135,8 @@ type AddInvoiceRequestBody struct {
 	DescriptionHash string `json:"description_hash" validate:"omitempty,hexadecimal,len=64"`
 }
 
+// AddInvoiceResponseBody kept because some clients use this
+// strunct rather than the lndhub lud6 one.
 type AddInvoiceResponseBody struct {
 	PaymentHash    string    `json:"payment_hash"`
 	PaymentRequest string    `json:"payment_request"`
@@ -145,14 +147,32 @@ type GetInvoicesResponseBody struct {
 	Invoices []Invoice `json:"invoices"`
 }
 
-type InvoiceResponseBody struct {
+// Lud6InvoiceResponseBody must comply with lud6
+// https://github.com/lnurl/luds/blob/luds/06.md
+type Lud6InvoiceResponseBody struct {
 	Payreq string   `json:"pr"`
 	Routes []string `json:"routes"`
 }
 
 type PaymentMetadata struct {
-	DocumentID string             `json:"document_id"`
-	Authors    map[string]float64 `json:"authors"`
+	Source  string             `json:"source"`
+	Authors map[string]float64 `json:"authors"`
+}
+
+// URL returns the information in PaymentMetadata in URL-like fashion:
+func (pmd *PaymentMetadata) URL() string {
+	var url string
+	if pmd.Source != "" {
+		url += "source=" + pmd.Source
+	}
+
+	for acc, slice := range pmd.Authors {
+		if url != "" {
+			url += "&"
+		}
+		url += "user=" + acc + "," + fmt.Sprintf("%4.2f", slice)
+	}
+	return url
 }
 
 // AddInvoice godoc
@@ -199,90 +219,6 @@ func (controller *InvoiceController) AddInvoice(c echo.Context) error {
 	return c.JSON(http.StatusOK, &responseBody)
 }
 
-// Invoice godoc
-// @Summary      Generate an invoice without credentials
-// @Description  Ask a user to generate an invoice
-// @Accept       json
-// @Produce      json
-// @Param        user_login path string true "User login or nickname"
-// @Param        amount path string true "amount in millisatoshis at the invoice"
-// @Tags         Invoice
-// @Success      200  {object}  InvoiceResponseBody
-// @Failure      400  {object}  responses.LnurlErrorResponse
-// @Failure      500  {object}  responses.LnurlErrorResponse
-// @Router       /v2/invoice/{user} [get]
-// @Security     OAuth2Password
-func (controller *InvoiceController) Invoice(c echo.Context) error {
-	// The user param could be userID (login) or a nickname (lnaddress)
-	user, err := controller.svc.FindUserByLoginOrNickname(c.Request().Context(), c.Param("user"))
-	if err != nil {
-		c.Logger().Errorf("Failed to find user by login or nickname: user %v error %v", c.Param("user"), err)
-		return c.JSON(http.StatusBadRequest, responses.LnurlpBadArgumentsError)
-	}
-	var amt_msat int64 = -1
-	if c.QueryParams().Has("amount") {
-		amt_msat, err = strconv.ParseInt(c.QueryParam("amount"), 10, 64)
-		if err != nil {
-			c.Logger().Errorf("Could not convert %v to uint64. %v", c.QueryParam("amount"), err)
-			return c.JSON(http.StatusBadRequest, responses.BadArgumentsError)
-		}
-	}
-
-	if controller.svc.Config.MaxReceiveAmount > 0 && amt_msat/1000 > controller.svc.Config.MaxReceiveAmount {
-		c.Logger().Errorf("Max receive amount exceeded for user_id:%v (amount:%v)", user.ID, amt_msat/1000)
-		return c.JSON(http.StatusBadRequest, responses.LnurlpBadArgumentsError)
-	}
-	paymentMeta := PaymentMetadata{Authors: map[string]float64{}}
-	if c.QueryParams().Has("account_id") {
-		for _, slice := range c.QueryParams()["account_id"] {
-			authorSlice := strings.Split(slice, ",")
-			if len(authorSlice) != 2 {
-				c.Logger().Debugf("account_id param must be in the format<acc_id>,<floatauthorship>, got %s", slice)
-				return c.JSON(http.StatusBadRequest, responses.LnurlpBadArgumentsError)
-			}
-			authorship, err := strconv.ParseFloat(authorSlice[1], 64)
-			if err != nil {
-				c.Logger().Debugf("Could not parse authorship from account_id: %v", c.QueryParams()["account_id"])
-				return c.JSON(http.StatusBadRequest, responses.LnurlpBadArgumentsError)
-			}
-			paymentMeta.Authors[authorSlice[0]] = authorship
-		}
-	}
-	if c.QueryParams().Has("document_id") {
-		paymentMeta.DocumentID = c.QueryParam("document_id")
-	}
-	records := []byte{}
-	if paymentMeta.DocumentID != "" {
-		records, err = json.Marshal(paymentMeta)
-		if err != nil {
-			c.Logger().Debugf("Could not parse to json: %v", paymentMeta)
-			return c.JSON(http.StatusBadRequest, responses.LnurlpBadArgumentsError)
-		}
-	}
-	var descriptionhash_string string = ""
-	var memo string = ""
-	if c.QueryParams().Has("memo") {
-		memo = c.QueryParam("memo")
-	} else {
-		descriptionHash := lnurlDescriptionHash(user.Nickname, controller.svc.Config.LnurlDomain)
-		descriptionhash_hex := sha256.Sum256([]byte(descriptionHash))
-		descriptionhash_string = hex.EncodeToString(descriptionhash_hex[:])
-	}
-
-	c.Logger().Infof("Adding invoice: user_id:%v value:%v description_hash:%s memo:%s", user.ID, amt_msat/1000, descriptionhash_string, memo)
-	invoice, err := controller.svc.AddIncomingInvoice(c.Request().Context(), user.ID, amt_msat/1000, memo, descriptionhash_string, records...)
-	if err != nil {
-		c.Logger().Errorf("Error creating invoice: user_id:%v error: %v", user.ID, err)
-		sentry.CaptureException(err)
-		return c.JSON(http.StatusBadRequest, responses.LnurlpBadArgumentsError)
-	}
-	responseBody := InvoiceResponseBody{}
-	responseBody.Payreq = invoice.PaymentRequest
-
-	return c.JSON(http.StatusOK, &responseBody)
-
-}
-
 // GetInvoice godoc
 // @Summary      Get a specific invoice
 // @Description  Retrieve information about a specific invoice by payment hash
@@ -301,7 +237,11 @@ func (controller *InvoiceController) GetInvoice(c echo.Context) error {
 	invoice, err := controller.svc.FindInvoiceByPaymentHash(c.Request().Context(), userID, rHash)
 	// Probably we did not find the invoice
 	if err != nil {
-		c.Logger().Errorf("Invalid checkpayment request user_id:%v payment_hash:%s", userID, rHash)
+		c.Logger().Errorf("Invalid invoices request user_id:%v payment_hash:%s", userID, rHash)
+		return c.JSON(http.StatusBadRequest, responses.BadArgumentsError)
+	}
+	if invoice.Type == common.InvoiceTypeSubinvoice && invoice.State != common.InvoiceStateSettled {
+		c.Logger().Info("Cannot show an open sub invoice to the user yet")
 		return c.JSON(http.StatusBadRequest, responses.BadArgumentsError)
 	}
 	responseBody := Invoice{

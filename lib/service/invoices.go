@@ -12,6 +12,7 @@ import (
 
 	"github.com/getAlby/lndhub.go/common"
 	"github.com/getAlby/lndhub.go/db/models"
+	"github.com/getAlby/lndhub.go/lib/responses"
 	"github.com/getAlby/lndhub.go/lnd"
 	"github.com/getsentry/sentry-go"
 	"github.com/labstack/gommon/random"
@@ -36,6 +37,15 @@ type SendPaymentResponse struct {
 	Invoice            *models.Invoice
 }
 
+type Captable struct {
+	// Invoice is the invoice that has been transmitted to LND.
+	Invoice *models.Invoice
+	// LeadingUserID is the ID of the user that is going to be paid in LND.
+	LeadingUserID int64
+	// SecondaryUsers are the rest of users (Excluding the leading user). Being the keys the lndhub IDs and the value the stake (0-1) on the invoice.
+	SecondaryUsers map[int64]float64
+}
+
 func (svc *LndhubService) FindInvoiceByPaymentHash(ctx context.Context, userId int64, rHash string) (*models.Invoice, error) {
 	var invoice models.Invoice
 
@@ -58,7 +68,7 @@ func (svc *LndhubService) SendInternalPayment(ctx context.Context, invoice *mode
 		incomingInvoice = *keysendInvoice
 	} else {
 		// find invoice
-		err := svc.DB.NewSelect().Model(&incomingInvoice).Where("type = ? AND r_hash = ? AND state = ? ", common.InvoiceTypeIncoming, invoice.RHash, common.InvoiceStateOpen).Limit(1).Scan(ctx)
+		err := svc.DB.NewSelect().Model(&incomingInvoice).Where("(type = ? OR type = ?) AND r_hash = ? AND state = ? ", common.InvoiceTypeIncoming, common.InvoiceTypeSubinvoice, invoice.RHash, common.InvoiceStateOpen).Limit(1).Scan(ctx)
 		if err != nil {
 			// invoice not found or already settled
 			// TODO: logging
@@ -90,24 +100,79 @@ func (svc *LndhubService) SendInternalPayment(ctx context.Context, invoice *mode
 
 	// For internal invoices we know the preimage and we use that as a response
 	// This allows wallets to get the correct preimage for a payment request even though NO lightning transaction was involved
-	preimage, _ := hex.DecodeString(incomingInvoice.Preimage)
-	sendPaymentResponse.PaymentPreimageStr = incomingInvoice.Preimage
-	sendPaymentResponse.PaymentPreimage = preimage
-	sendPaymentResponse.Invoice = &incomingInvoice
-	paymentHash, _ := hex.DecodeString(incomingInvoice.RHash)
-	sendPaymentResponse.PaymentHashStr = incomingInvoice.RHash
-	sendPaymentResponse.PaymentHash = paymentHash
-	sendPaymentResponse.PaymentRoute = &Route{TotalAmt: incomingInvoice.Amount, TotalFees: 0}
-
+	if incomingInvoice.Type == common.InvoiceTypeIncoming { // we don't want to return the sub_invoices
+		preimage, _ := hex.DecodeString(incomingInvoice.Preimage)
+		sendPaymentResponse.PaymentPreimageStr = incomingInvoice.Preimage
+		sendPaymentResponse.PaymentPreimage = preimage
+		sendPaymentResponse.Invoice = &incomingInvoice
+		paymentHash, _ := hex.DecodeString(incomingInvoice.RHash)
+		sendPaymentResponse.PaymentHashStr = incomingInvoice.RHash
+		sendPaymentResponse.PaymentHash = paymentHash
+		sendPaymentResponse.PaymentRoute = &Route{TotalAmt: incomingInvoice.Amount, TotalFees: 0}
+	}
 	incomingInvoice.Internal = true // mark incoming invoice as internal, just for documentation/debugging
 	incomingInvoice.State = common.InvoiceStateSettled
 	incomingInvoice.SettledAt = schema.NullTime{Time: time.Now()}
 	incomingInvoice.Amount = invoice.Amount // set just in case of 0 amount invoice
+
 	_, err = svc.DB.NewUpdate().Model(&incomingInvoice).WherePK().Exec(ctx)
 	if err != nil {
 		// could not save the invoice of the recipient
 		return sendPaymentResponse, err
 	}
+
+	var subInvoice models.Invoice
+	err = svc.DB.NewSelect().Model(&subInvoice).Where("type = ? AND preimage = ? AND add_index = ? AND state <> ? AND expires_at > ?",
+		common.InvoiceTypeSubinvoice,
+		incomingInvoice.Preimage,
+		incomingInvoice.AddIndex,
+		common.InvoiceStateSettled,
+		time.Now()).Limit(1).Scan(ctx)
+
+	if err == nil && subInvoice.AddIndex == incomingInvoice.AddIndex && incomingInvoice.State == common.InvoiceStateSettled {
+		svc.Logger.Infof("Internal Payment subinvoice found, settling it.")
+		// We update the rhash because we are going to find it later by rhash and we did
+		// not copy the rhash when splitting the invoice (in order not to be prematurely discovered)
+		subInvoice.RHash = incomingInvoice.RHash
+		_, err = svc.DB.NewUpdate().Model(&subInvoice).WherePK().Exec(ctx)
+		if err != nil {
+			svc.Logger.Infof("Could not settle sub invoice %s", err.Error())
+		}
+		_, err = svc.SendInternalPayment(ctx, &subInvoice)
+		if err == nil {
+			// We decrease payer account
+			// Get the user's current and outgoing account for the transaction entry
+			userId := subInvoice.OriginUserID
+
+			debitAccount, err := svc.AccountFor(ctx, common.AccountTypeCurrent, userId)
+			if err != nil {
+				svc.Logger.Errorf("Could not find current account user_id:%v", userId)
+				return sendPaymentResponse, err
+			}
+			creditAccount, err := svc.AccountFor(ctx, common.AccountTypeOutgoing, userId)
+			if err != nil {
+				svc.Logger.Errorf("Could not find outgoing account user_id:%v", userId)
+				return sendPaymentResponse, err
+			}
+
+			entry := models.TransactionEntry{
+				UserID:          userId,
+				InvoiceID:       subInvoice.ID,
+				CreditAccountID: creditAccount.ID,
+				DebitAccountID:  debitAccount.ID,
+				Amount:          subInvoice.Amount,
+			}
+
+			// The DB constraints make sure the user actually has enough balance for the transaction
+			// If the user does not have enough balance this call fails
+			_, err = svc.DB.NewInsert().Model(&entry).Exec(ctx)
+			if err != nil {
+				svc.Logger.Errorf("Could not insert transaction entry user_id:%v invoice_id:%v", userId, invoice.ID)
+				return sendPaymentResponse, err
+			}
+		}
+	}
+
 	svc.InvoicePubSub.Publish(strconv.FormatInt(incomingInvoice.UserID, 10), incomingInvoice)
 	svc.InvoicePubSub.Publish(common.InvoiceTypeIncoming, incomingInvoice)
 
@@ -152,10 +217,18 @@ func (svc *LndhubService) createLnRpcSendRequest(invoice *models.Invoice) (*lnrp
 	}
 
 	if !invoice.Keysend {
+		// TODO(juligasa): uncomment when we actually store the custom records in the real invoice. RN we
+		// only store it in the database but we don't inform LND of such custom records.
+		/*
+			if len(splits) > MAX_CUSTOM_RECORD_SIZE {
+				return nil, fmt.Errorf("max custom records size is %d, but %d were given", MAX_CUSTOM_RECORD_SIZE, len(splits))
+			}
+		*/
 		return &lnrpc.SendRequest{
 			PaymentRequest: invoice.PaymentRequest,
 			Amt:            invoice.Amount,
 			FeeLimit:       &feeLimit,
+			//DestCustomRecords: invoice.DestinationCustomRecords, #TODO(juligasa): Uncomment to actually store custom records
 		}, nil
 	}
 
@@ -294,7 +367,7 @@ func (svc *LndhubService) HandleSuccessfulPayment(ctx context.Context, invoice *
 	_, err := svc.DB.NewUpdate().Model(invoice).WherePK().Exec(ctx)
 	if err != nil {
 		sentry.CaptureException(err)
-		svc.Logger.Errorf("Could not update sucessful payment invoice user_id:%v invoice_id:%v, error %s", invoice.UserID, invoice.ID, err.Error())
+		svc.Logger.Errorf("Could not update successful payment invoice user_id:%v invoice_id:%v, error %s", invoice.UserID, invoice.ID, err.Error())
 	}
 
 	// Get the user's fee account for the transaction entry, current account is already there in parent entry
@@ -361,21 +434,51 @@ func (svc *LndhubService) AddOutgoingInvoice(ctx context.Context, userID int64, 
 	return &invoice, nil
 }
 
+// If something goes wrong we should remove the lnd invoice with the same RHash. (cancel LND and remove from tables or cancel them common.InvoiceStateError,)
+// When paid the leading invoice we should call sendInternalPayment, with all of the
+// secondary and make sure it broadcasts all the split payments as well in the subscription methods (hooks).
+func (svc *LndhubService) SplitIncomingPayment(ctx context.Context, captable Captable) error {
+	for user, slice := range captable.SecondaryUsers {
+		if user == captable.LeadingUserID {
+			svc.Logger.Debug(responses.LeadAuthorIncludedError.Error())
+			return responses.LeadAuthorIncludedError
+		}
+		internalInvoice := models.Invoice{
+			Type:                     common.InvoiceTypeSubinvoice,
+			UserID:                   user,
+			OriginUserID:             captable.LeadingUserID,
+			Amount:                   int64(float64(captable.Invoice.Amount) * slice),
+			Memo:                     captable.Invoice.Memo,
+			State:                    common.InvoiceStateOpen,
+			ExpiresAt:                captable.Invoice.ExpiresAt,
+			DestinationCustomRecords: captable.Invoice.DestinationCustomRecords,
+			PaymentRequest:           captable.Invoice.PaymentRequest,
+			AddIndex:                 captable.Invoice.AddIndex,
+			Preimage:                 captable.Invoice.Preimage,
+			DestinationPubkeyHex:     captable.Invoice.DestinationPubkeyHex,
+		}
+
+		if _, err := svc.DB.NewInsert().Model(&internalInvoice).Exec(ctx); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (svc *LndhubService) AddIncomingInvoice(ctx context.Context, userID int64, amount int64, memo, descriptionHashStr string, splits ...byte) (*models.Invoice, error) {
 	preimage, err := makePreimageHex()
 	if err != nil {
 		return nil, err
 	}
 	expiry := time.Hour * 24 // invoice expires in 24h
-	// Initialize new DB invoice
 	customRecords := map[uint64][]byte{}
 	if len(splits) > 0 {
 		if len(splits) > MAX_CUSTOM_RECORD_SIZE {
-			return nil, fmt.Errorf("Max custom records size is %d, but %d were given", MAX_CUSTOM_RECORD_SIZE, len(splits))
+			return nil, fmt.Errorf("max custom records size is %d, but %d were given", MAX_CUSTOM_RECORD_SIZE, len(splits))
 		}
 		customRecords[TLV_SPLIT_ID] = splits
 	}
-
+	// Initialize new DB invoice
 	invoice := models.Invoice{
 		Type:                     common.InvoiceTypeIncoming,
 		UserID:                   userID,

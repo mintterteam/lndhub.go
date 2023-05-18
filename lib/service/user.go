@@ -24,6 +24,12 @@ func (svc *LndhubService) CreateUser(ctx context.Context, login, password, nickn
 
 	user = &models.User{}
 
+	// Check first if requested house user
+	houseUser, err := svc.FindUserByLogin(ctx, login)
+	if err == nil && houseUser.Login == svc.Config.HouseUser {
+		return &models.User{ID: houseUser.ID}, nil
+	}
+
 	// generate user login/password if not provided
 	user.Login = login
 	if login == "" {
@@ -204,6 +210,19 @@ func (svc *LndhubService) InvoicesFor(ctx context.Context, userId int64, invoice
 	if invoiceType != "" {
 		query.Where("type = ? AND state <> ?", invoiceType, common.InvoiceStateInitialized)
 	}
+	query.OrderExpr("id DESC").Limit(100)
+	err := query.Scan(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return invoices, nil
+}
+
+func (svc *LndhubService) InvoicesIncomingAndInternalFor(ctx context.Context, userId int64) ([]models.Invoice, error) {
+	var invoices []models.Invoice
+
+	query := svc.DB.NewSelect().Model(&invoices).Where("user_id = ?", userId)
+	query.Where("state <> ? AND (type = ? OR type = ?)", common.InvoiceStateInitialized, common.InvoiceTypeIncoming, common.InvoiceTypeSubinvoice)
 	query.OrderExpr("id DESC").Limit(100)
 	err := query.Scan(ctx)
 	if err != nil {

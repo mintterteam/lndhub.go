@@ -100,8 +100,10 @@ func (svc *LndhubService) ProcessInvoiceUpdate(ctx context.Context, rawInvoice *
 		}
 	}
 	// Search for an incoming invoice with the r_hash that is NOT settled in our DB
-	err := svc.DB.NewSelect().Model(&invoice).Where("type = ? AND r_hash = ? AND state <> ? AND expires_at > ?",
+
+	err := svc.DB.NewSelect().Model(&invoice).Where("(type = ? OR type = ?) AND r_hash = ? AND state <> ? AND expires_at > ?",
 		common.InvoiceTypeIncoming,
+		common.InvoiceTypeSubinvoice,
 		rHashStr,
 		common.InvoiceStateSettled,
 		time.Now()).Limit(1).Scan(ctx)
@@ -114,7 +116,7 @@ func (svc *LndhubService) ProcessInvoiceUpdate(ctx context.Context, rawInvoice *
 	// If the invoice is settled we save the settle date and the status otherwise we just store the lnd status
 	// Additionally to the invoice update we create a transaction entry from the user's incoming account to the user's current account
 	// This transaction entry makes the balance available for the user
-	svc.Logger.Infof("Invoice update: invoice_id:%v settled:%v value:%v state:%v", invoice.ID, rawInvoice.Settled, rawInvoice.AmtPaidSat, rawInvoice.State)
+	svc.Logger.Infof("Invoice update: invoice_id:%v value:%v state:%v", invoice.ID, rawInvoice.AmtPaidSat, rawInvoice.State)
 
 	// Get the user's current account for the transaction entry
 	creditAccount, err := svc.AccountFor(ctx, common.AccountTypeCurrent, invoice.UserID)
@@ -141,7 +143,7 @@ func (svc *LndhubService) ProcessInvoiceUpdate(ctx context.Context, rawInvoice *
 	}
 
 	// if the invoice is NOT settled we just update the invoice state
-	if !rawInvoice.Settled {
+	if rawInvoice.State != lnrpc.Invoice_SETTLED {
 		svc.Logger.Infof("Invoice not settled invoice_id:%v state: %s", invoice.ID, rawInvoice.State.String())
 		invoice.State = strings.ToLower(rawInvoice.State.String())
 
@@ -181,6 +183,62 @@ func (svc *LndhubService) ProcessInvoiceUpdate(ctx context.Context, rawInvoice *
 	}
 	svc.InvoicePubSub.Publish(strconv.FormatInt(invoice.UserID, 10), invoice)
 	svc.InvoicePubSub.Publish(common.InvoiceTypeIncoming, invoice)
+
+	var subInvoice models.Invoice
+
+	err = svc.DB.NewSelect().Model(&subInvoice).Where("type = ? AND preimage = ? AND add_index = ? AND state <> ? AND expires_at > ?",
+		common.InvoiceTypeSubinvoice,
+		invoice.Preimage,
+		invoice.AddIndex,
+		common.InvoiceStateSettled,
+		time.Now()).Limit(1).Scan(ctx)
+
+	if err == nil && subInvoice.AddIndex == invoice.AddIndex && rawInvoice.State == lnrpc.Invoice_SETTLED {
+		svc.Logger.Infof("External Payment subinvoice found, settling it.")
+		newRawInvoice := *rawInvoice
+		newRawInvoice.Memo = invoice.Memo
+		newRawInvoice.Value = subInvoice.Amount
+		newRawInvoice.AmtPaidSat = subInvoice.Amount
+		dH, _ := hex.DecodeString(invoice.DescriptionHash)
+		newRawInvoice.DescriptionHash = dH
+		pI, _ := hex.DecodeString(invoice.Preimage)
+		newRawInvoice.DescriptionHash = dH
+		newRawInvoice.RPreimage = pI
+		subInvoice.RHash = invoice.RHash
+		_, err = svc.DB.NewUpdate().Model(&subInvoice).WherePK().Exec(ctx)
+		if err != nil {
+			svc.Logger.Infof("Could not settle sub invoice %s", err.Error())
+		}
+		userId := subInvoice.OriginUserID
+
+		debitAccount, err := svc.AccountFor(ctx, common.AccountTypeCurrent, userId)
+		if err != nil {
+			svc.Logger.Errorf("Could not find current account user_id:%v", userId)
+			return err
+		}
+		creditAccount, err := svc.AccountFor(ctx, common.AccountTypeOutgoing, userId)
+		if err != nil {
+			svc.Logger.Errorf("Could not find outgoing account user_id:%v", userId)
+			return err
+		}
+
+		entry := models.TransactionEntry{
+			UserID:          userId,
+			InvoiceID:       subInvoice.ID,
+			CreditAccountID: creditAccount.ID,
+			DebitAccountID:  debitAccount.ID,
+			Amount:          subInvoice.Amount,
+		}
+
+		// The DB constraints make sure the user actually has enough balance for the transaction
+		// If the user does not have enough balance this call fails
+		_, err = svc.DB.NewInsert().Model(&entry).Exec(ctx)
+		if err != nil {
+			svc.Logger.Errorf("Could not insert transaction entry user_id:%v invoice_id:%v", userId, invoice.ID)
+			return err
+		}
+		return svc.ProcessInvoiceUpdate(ctx, &newRawInvoice)
+	}
 
 	return nil
 }
@@ -235,7 +293,12 @@ func (svc *LndhubService) ConnectInvoiceSubscription(ctx context.Context) (lnd.S
 		return nil, err
 	}
 	// subtract 1 (read invoiceSubscriptionOptions.Addindex docs)
-	invoiceSubscriptionOptions.AddIndex = invoice.AddIndex - 1
+	if invoice.AddIndex > 0 {
+		invoiceSubscriptionOptions.AddIndex = invoice.AddIndex - 1
+	} else {
+		invoiceSubscriptionOptions.AddIndex = 0
+	}
+
 	svc.Logger.Infof("Starting invoice subscription from index: %v", invoiceSubscriptionOptions.AddIndex)
 	return svc.LndClient.SubscribeInvoices(ctx, &invoiceSubscriptionOptions)
 }

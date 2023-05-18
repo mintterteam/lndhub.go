@@ -185,13 +185,17 @@ func main() {
 		IdentityPubkey: getInfo.IdentityPubkey,
 		InvoicePubSub:  service.NewPubsub(),
 	}
+	// create user collecting remainder of splitting payments
+	if _, err := svc.CreateUser(context.Background(), svc.Config.HouseUser, "", ""); err != nil {
+		e.Logger.Fatalf("Error Creating House User: %v", err)
+	}
 
 	strictRateLimitPerMinMW := createRateLimitMiddleware(c.StrictRateLimitPerMin, 1*time.Minute)
 	strictRateLimitPerSecMW := createRateLimitMiddleware(c.StrictRateLimitPerSec, 1*time.Second)
 	regularRateLimitPerMinMW := createRateLimitMiddleware(c.DefaultRateLimitPerMin, 1*time.Minute)
 	regularRateLimitPerSecMW := createRateLimitMiddleware(c.DefaultRateLimitPerSec, 1*time.Second)
 	tokenMW := tokens.Middleware(c.JWTSecret)
-	RegisterLegacyEndpoints(svc, e, tokenMW, strictRateLimitPerMinMW, strictRateLimitPerSecMW, regularRateLimitPerMinMW, regularRateLimitPerSecMW)
+	RegisterLegacyEndpoints(svc, e, tokenMW, strictRateLimitPerMinMW, strictRateLimitPerSecMW, regularRateLimitPerMinMW, regularRateLimitPerSecMW, tokens.AdminTokenMiddleware(c.AdminToken))
 	RegisterV2Endpoints(svc, e, tokenMW, strictRateLimitPerMinMW, strictRateLimitPerSecMW, regularRateLimitPerMinMW, regularRateLimitPerSecMW, security.SignatureMiddleware())
 
 	//Swagger API spec

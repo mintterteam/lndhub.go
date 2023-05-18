@@ -28,6 +28,7 @@ import (
 const (
 	mockLNDAddress     = "mock.lnd.local"
 	mockLNDMacaroonHex = "omnomnom"
+	mockHousePassword  = "49ol65QxsuIvnTJaRWht"
 )
 
 func LndHubTestServiceInit(lndClientMock lnd.LightningClientWrapper) (svc *service.LndhubService, err error) {
@@ -45,6 +46,7 @@ func LndHubTestServiceInit(lndClientMock lnd.LightningClientWrapper) (svc *servi
 		MaxReceiveAmount:        1000000,
 		MaxSendAmount:           100000,
 		LnurlDomain:             "testnet.example.com",
+		HouseUser:               "6CXQAGHM52tYlpysOSry",
 	}
 
 	rabbitmqUri, ok := os.LookupEnv("RABBITMQ_URI")
@@ -94,6 +96,10 @@ func LndHubTestServiceInit(lndClientMock lnd.LightningClientWrapper) (svc *servi
 	svc.IdentityPubkey = getInfo.IdentityPubkey
 
 	svc.InvoicePubSub = service.NewPubsub()
+	// create user collecting remainder of splitting payments
+	if _, err := svc.CreateUser(context.Background(), svc.Config.HouseUser, mockHousePassword, ""); err != nil {
+		logger.Fatalf("Error Creating House User: %v", err)
+	}
 	return svc, nil
 }
 
