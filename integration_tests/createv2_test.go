@@ -13,8 +13,7 @@ import (
 
 	"math/rand"
 
-	"github.com/ipfs/go-cid"
-	"github.com/libp2p/go-libp2p-core/crypto"
+	"github.com/libp2p/go-libp2p/core/crypto"
 
 	v2controllers "github.com/getAlby/lndhub.go/controllers_v2"
 	"github.com/getAlby/lndhub.go/lib"
@@ -23,8 +22,6 @@ import (
 	"github.com/getAlby/lndhub.go/lib/service"
 	"github.com/go-playground/validator/v10"
 	"github.com/labstack/echo/v4"
-	"github.com/libp2p/go-libp2p-core/peer"
-	"github.com/multiformats/go-multihash"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 )
@@ -72,11 +69,14 @@ func (suite *CreateUserV2TestSuite) TestCreateAndChangeNickname() {
 	pubBytes, _ := pub.Raw()
 	messageSigned, err := priv.Sign([]byte(security.LOGIN_MESSAGE))
 	assert.NoError(suite.T(), err)
-	pid, err := peer.IDFromPublicKey(pub)
+
+	pub_bytes, err := pub.Raw()
 	assert.NoError(suite.T(), err)
-	mh, err := multihash.Cast([]byte(pid))
+	pubKey, err := crypto.UnmarshalEd25519PublicKey(pub_bytes)
 	assert.NoError(suite.T(), err)
-	testLogin := cid.NewCidV1(security.MHASH_CODEC, mh).String()
+	principal, err := security.PrincipalFromPubKey(pubKey)
+	assert.NoError(suite.T(), err)
+	testLogin := principal.String()
 
 	assert.NoError(suite.T(), json.NewEncoder(&buf).Encode(&ExpectedCreateUserRequestBody{
 		Login:    testLogin,
@@ -146,11 +146,14 @@ func (suite *CreateUserV2TestSuite) TestCreateWrongLogin() {
 	pubBytes, _ := pub.Raw()
 	messageSigned, err := priv.Sign([]byte(security.LOGIN_MESSAGE))
 	assert.NoError(suite.T(), err)
-	pid, err := peer.IDFromPublicKey(pub)
+
+	pub_bytes, err := pub.Raw()
 	assert.NoError(suite.T(), err)
-	mh, err := multihash.Cast([]byte(pid))
+	pubKey, err := crypto.UnmarshalEd25519PublicKey(pub_bytes)
 	assert.NoError(suite.T(), err)
-	testLogin := cid.NewCidV1(security.MHASH_CODEC, mh).String() + "a"
+	principal, err := security.PrincipalFromPubKey(pubKey)
+	assert.NoError(suite.T(), err)
+	testLogin := principal.String() + "=="
 	e.Validator = &lib.CustomValidator{Validator: validator.New()}
 
 	assert.NoError(suite.T(), json.NewEncoder(&buf).Encode(&ExpectedCreateUserRequestBody{
@@ -186,11 +189,13 @@ func (suite *CreateUserV2TestSuite) TestCreateWrongSignature() {
 	messageSigned := make([]byte, 64)
 	rand.Read(messageSigned)
 	assert.NoError(suite.T(), err)
-	pid, err := peer.IDFromPublicKey(pub)
+	pub_bytes, err := pub.Raw()
 	assert.NoError(suite.T(), err)
-	mh, err := multihash.Cast([]byte(pid))
+	pubKey, err := crypto.UnmarshalEd25519PublicKey(pub_bytes)
 	assert.NoError(suite.T(), err)
-	testLogin := cid.NewCidV1(security.MHASH_CODEC, mh).String()
+	principal, err := security.PrincipalFromPubKey(pubKey)
+	assert.NoError(suite.T(), err)
+	testLogin := principal.String()
 	e.Validator = &lib.CustomValidator{Validator: validator.New()}
 
 	assert.NoError(suite.T(), json.NewEncoder(&buf).Encode(&ExpectedCreateUserRequestBody{

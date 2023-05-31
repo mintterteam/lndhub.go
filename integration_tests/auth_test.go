@@ -69,7 +69,7 @@ func (suite *UserAuthTestSuite) TestAuth() {
 	assert.NoError(suite.T(), json.NewDecoder(rec.Body).Decode(&responseBody))
 	assert.NotEmpty(suite.T(), responseBody.AccessToken)
 	assert.NotEmpty(suite.T(), responseBody.RefreshToken)
-	fmt.Printf("Succesfully got a token using login and password: %s\n", responseBody.AccessToken)
+	fmt.Printf("Successfully got a token using login and password: %s\n", responseBody.AccessToken)
 
 	// login again with only refresh token
 	assert.NoError(suite.T(), json.NewEncoder(&buf).Encode(&ExpectedAuthRequestBody{
@@ -86,7 +86,7 @@ func (suite *UserAuthTestSuite) TestAuth() {
 	assert.NoError(suite.T(), json.NewDecoder(rec.Body).Decode(&responseBody))
 	assert.NotEmpty(suite.T(), responseBody.AccessToken)
 	assert.NotEmpty(suite.T(), responseBody.RefreshToken)
-	fmt.Printf("Succesfully got a token using refresh token only: %s\n", responseBody.AccessToken)
+	fmt.Printf("Successfully got a token using refresh token only: %s\n", responseBody.AccessToken)
 }
 
 func (suite *UserAuthTestSuite) TestAuthWithExpiredRefreshToken() {

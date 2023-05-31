@@ -10,17 +10,13 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/ipfs/go-cid"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
-	"github.com/libp2p/go-libp2p-core/crypto"
-	"github.com/libp2p/go-libp2p-core/peer"
-	"github.com/multiformats/go-multihash"
+	"github.com/libp2p/go-libp2p/core/crypto"
 )
 
 const (
 	LOGIN_MESSAGE = "sign in into mintter lndhub"
-	MHASH_CODEC   = 1091161161
 )
 
 func SignatureMiddleware() echo.MiddlewareFunc {
@@ -46,7 +42,7 @@ func check_skip(c echo.Context) bool {
 	}
 	var actualLogin = login.(string)
 
-	_, err = cid.Parse(actualLogin)
+	_, err = DecodePrincipal(actualLogin)
 	if err != nil {
 		c.Logger().Debugf("login %s not a cid", actualLogin)
 		return true
@@ -85,19 +81,13 @@ func validate_signature(pubKeyStr string, c echo.Context) (bool, error) {
 
 	pubKey, err := crypto.UnmarshalEd25519PublicKey(pub)
 	if err != nil {
-		return false, fmt.Errorf("Unable to unmarshal pubkey %v", err)
+		return false, fmt.Errorf("unable to unmarshal pubkey %v", err)
 	}
 
-	pid, err := peer.IDFromPublicKey(pubKey)
+	expectedLogin, err := PrincipalFromPubKey(pubKey)
 	if err != nil {
-		return false, fmt.Errorf("Unable to get ID from pubkey")
+		return false, fmt.Errorf("Unable to get Principal from pubkey")
 	}
-	mh, err := multihash.Cast([]byte(pid))
-	if err != nil {
-		return false, fmt.Errorf("Unable to multihash ID")
-	}
-
-	expectedLogin := cid.NewCidV1(MHASH_CODEC, mh)
 
 	if actualLogin != expectedLogin.String() {
 		err = fmt.Errorf("expected login %s bug got login %s", expectedLogin.String(), actualLogin)
