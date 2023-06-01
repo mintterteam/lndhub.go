@@ -19,7 +19,7 @@ import (
 
 const (
 	MIN_RECEIVABLE_MSATS = 1000
-	SERVICE_CUT_BPS      = 125 // 125 basis points
+	SERVICE_CUT_BPS      = 0 // 0basis points->Up the the client
 	PREFIX_SINGLE_MSG    = "Sats for "
 	PREFIX_TWO_MSG       = "Sat to be split between "
 	PREFIX_MULTIPLE_MSG  = "Sat to be split among: "
@@ -200,22 +200,21 @@ func (controller *LnurlController) Lnurlp(c echo.Context) error {
 	responseBody.MinSendable = MIN_RECEIVABLE_MSATS
 	responseBody.MaxSendable = uint64(controller.svc.Config.MaxReceiveAmount * 1000)
 	responseBody.Callback = "https://" + controller.svc.Config.LnurlDomain + "/v2/invoice?user=" + c.Param("user")
-	if !c.QueryParams().Has("amt") {
-		c.Logger().Debug("Amount not provided")
-		return c.JSON(http.StatusBadRequest, responses.LnurlpBadArgumentsError)
+	if c.QueryParams().Has("amt") {
+		amt, err := strconv.ParseInt(c.QueryParam("amt"), 10, 64)
+		if err != nil {
+			c.Logger().Errorf("Could not convert %v to uint64. %v", c.QueryParam(c.QueryParam("amt")), err)
+			return c.JSON(http.StatusBadRequest, responses.LnurlpBadArgumentsError)
+		}
+		if amt > controller.svc.Config.MaxReceiveAmount || amt < MIN_RECEIVABLE_MSATS {
+			c.Logger().Errorf("amt provided (%d) not in range [%d-%d] msats. %v", amt, MIN_RECEIVABLE_MSATS, controller.svc.Config.MaxReceiveAmount)
+			return c.JSON(http.StatusBadRequest, responses.LnurlpBadArgumentsError)
+		}
+
+		responseBody.Callback = responseBody.Callback + "&amount=" + strconv.FormatInt(amt*1000, 10)
+		responseBody.MinSendable = uint64(amt * 1000)
+		responseBody.MaxSendable = uint64(amt * 1000)
 	}
-	amt, err := strconv.ParseInt(c.QueryParam("amt"), 10, 64)
-	if err != nil {
-		c.Logger().Errorf("Could not convert %v to uint64. %v", c.QueryParam(c.QueryParam("amt")), err)
-		return c.JSON(http.StatusBadRequest, responses.LnurlpBadArgumentsError)
-	}
-	if amt > controller.svc.Config.MaxReceiveAmount || amt < MIN_RECEIVABLE_MSATS {
-		c.Logger().Errorf("amt provided (%d) not in range [%d-%d] msats. %v", amt, MIN_RECEIVABLE_MSATS, controller.svc.Config.MaxReceiveAmount)
-		return c.JSON(http.StatusBadRequest, responses.LnurlpBadArgumentsError)
-	}
-	responseBody.MinSendable = uint64(amt * 1000)
-	responseBody.MaxSendable = uint64(amt * 1000)
-	responseBody.Callback = responseBody.Callback + "&amount=" + strconv.FormatInt(amt*1000, 10)
 
 	responseBody.Metadata = lnurlDescriptionHash([]*models.User{user}, controller.svc.Config.LnurlDomain)
 	responseBody.CommentAllowed = LNURLP_COMMENT_SIZE

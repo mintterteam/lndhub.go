@@ -388,9 +388,33 @@ func (suite *LnurlTestSuite) TestGetLnurlInvoiceZeroAmt() {
 	req := httptest.NewRequest(http.MethodGet, "/v2/lnurlp/"+suite.userLogin[1].Login, nil)
 	rec := httptest.NewRecorder()
 	suite.echo.ServeHTTP(rec, req)
-	assert.Equal(suite.T(), http.StatusBadRequest, rec.Code)
-}
+	lnurlResponse := &ExpectedLnurlpResponseBody{}
+	assert.Equal(suite.T(), http.StatusOK, rec.Code)
+	assert.NoError(suite.T(), json.NewDecoder(rec.Body).Decode(lnurlResponse))
+	assert.EqualValues(suite.T(), lnurlResponse.Tag, v2controllers.LNURLP_TAG)
+	assert.EqualValues(suite.T(), lnurlResponse.MinSendable, v2controllers.MIN_RECEIVABLE_MSATS)
+	assert.EqualValues(suite.T(), lnurlResponse.MaxSendable, suite.service.Config.MaxReceiveAmount*1000)
+	urlStart := strings.Index(lnurlResponse.Callback, "/v2/invoice")
+	assert.Greater(suite.T(), urlStart, 0)
 
+	// call callback
+	var amt_msats = suite.service.Config.MaxReceiveAmount * 1000
+	req = httptest.NewRequest(http.MethodGet, lnurlResponse.Callback[urlStart:]+"&amount="+strconv.FormatInt(amt_msats+2000, 10), nil)
+	rec2 := httptest.NewRecorder()
+	suite.echo.ServeHTTP(rec2, req)
+	assert.Equal(suite.T(), http.StatusBadRequest, rec2.Code)
+
+	req = httptest.NewRequest(http.MethodGet, lnurlResponse.Callback[urlStart:]+"&amount="+strconv.FormatInt(amt_msats/2, 10), nil)
+	rec3 := httptest.NewRecorder()
+	invoiceResponse := &v2controllers.Lud6InvoiceResponseBody{}
+	suite.echo.ServeHTTP(rec3, req)
+	assert.Equal(suite.T(), http.StatusOK, rec3.Code)
+	assert.NoError(suite.T(), json.NewDecoder(rec3.Body).Decode(invoiceResponse))
+	assert.Equal(suite.T(), 0, len(invoiceResponse.Routes))
+	decodedPayreq, err := suite.mlnd.DecodeBolt11(context.Background(), invoiceResponse.Payreq)
+	assert.NoError(suite.T(), err)
+	assert.EqualValues(suite.T(), amt_msats/2, decodedPayreq.NumMsat)
+}
 func (suite *LnurlTestSuite) TestGetLnurlInvoiceCustomAmt() {
 	// call the lnurl endpoint
 	const amt_sats = int64(1245)
