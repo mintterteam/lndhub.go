@@ -50,6 +50,7 @@ func (suite *InvoiceTestSuite) SetupSuite() {
 	suite.aliceLogin = users[0]
 	suite.aliceToken = userTokens[0]
 	suite.echo.POST("/invoice/:user_login", controllers.NewInvoiceController(svc).Invoice)
+	suite.echo.GET("/v2/invoicemeta/:payment_hash", v2controllers.NewInvoiceController(svc).GetInvoiceMeta)
 	suite.echo.POST("/v2/invoices", v2controllers.NewInvoiceController(svc).AddInvoice, tokens.Middleware([]byte(suite.service.Config.JWTSecret)))
 }
 
@@ -81,6 +82,22 @@ func (suite *InvoiceTestSuite) TestAddInvoiceWithoutToken() {
 	// check if invoice is added
 	invoicesAfter, _ := suite.service.InvoicesFor(context.Background(), user.ID, common.InvoiceTypeIncoming)
 	assert.Equal(suite.T(), 1, len(invoicesAfter))
+
+}
+
+func (suite *InvoiceTestSuite) TestGetInvoiceMetadata() {
+	user, _ := suite.service.FindUserByLogin(context.Background(), suite.aliceLogin.Login)
+	invoice := suite.createInvoiceReq(358, "My invoice", user.Login)
+
+	// check if we can get the invoice
+	invoiceResponse := &v2controllers.Invoice{}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/v2/invoicemeta/"+invoice.RHash+"?user="+user.Login, nil)
+	suite.echo.ServeHTTP(rec, req)
+	assert.Equal(suite.T(), http.StatusOK, rec.Code)
+	assert.NoError(suite.T(), json.NewDecoder(rec.Body).Decode(invoiceResponse))
+	assert.Equal(suite.T(), common.InvoiceStateOpen, invoiceResponse.Status)
+	assert.EqualValues(suite.T(), 0, invoiceResponse.Amount)
 }
 
 func (suite *InvoiceTestSuite) TestAddInvoiceForNonExistingUser() {

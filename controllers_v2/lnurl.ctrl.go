@@ -161,6 +161,7 @@ func (controller *InvoiceController) Lud6Invoice(c echo.Context) error {
 	}
 	responseBody := Lud6InvoiceResponseBody{}
 	responseBody.Payreq = invoice.PaymentRequest
+	responseBody.PaymentHash = invoice.RHash
 	captable.Invoice = invoice
 	if err := controller.svc.SplitIncomingPayment(c.Request().Context(), captable); err != nil {
 		c.Logger().Errorf("Error splitting invoice: %v", err)

@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/getAlby/lndhub.go/common"
 	"github.com/getAlby/lndhub.go/controllers"
 	v2controllers "github.com/getAlby/lndhub.go/controllers_v2"
 	"github.com/getAlby/lndhub.go/lib"
@@ -68,6 +69,7 @@ func (suite *LnurlTestSuite) SetupSuite() {
 	suite.echo.GET("/v2/invoice", v2controllers.NewInvoiceController(suite.service).Lud6Invoice)
 	suite.echo.GET("/v2/balance", v2controllers.NewBalanceController(suite.service).Balance, tokensmw.Middleware([]byte(suite.service.Config.JWTSecret)))
 	suite.echo.POST("/v2/payinvoice", v2controllers.NewPayInvoiceController(suite.service).PayInvoice, tokensmw.Middleware([]byte(suite.service.Config.JWTSecret)))
+	suite.echo.GET("/v2/invoicemeta/:payment_hash", v2controllers.NewInvoiceController(svc).GetInvoiceMeta)
 	suite.echo.GET("/v2/invoices/incoming", v2controllers.NewInvoiceController(suite.service).GetIncomingInvoices, tokensmw.Middleware([]byte(suite.service.Config.JWTSecret)))
 	suite.echo.GET("/v2/invoices/:payment_hash", v2controllers.NewInvoiceController(suite.service).GetInvoice, tokensmw.Middleware([]byte(suite.service.Config.JWTSecret)))
 }
@@ -102,6 +104,7 @@ func (suite *LnurlTestSuite) TestLud6InvoiceWithMetadata() {
 	assert.NoError(suite.T(), err)
 	assert.EqualValues(suite.T(), amountmsats, decodedPayreq.NumMsat)
 	assert.EqualValues(suite.T(), memo, decodedPayreq.Description)
+	assert.EqualValues(suite.T(), decodedPayreq.PaymentHash, invoiceResponse.PaymentHash)
 	//2 users + amount
 	const sliceAcc1 = 0.45
 	const sliceAcc2 = 0.53
@@ -137,6 +140,12 @@ func (suite *LnurlTestSuite) TestLud6InvoiceWithMetadata() {
 	assert.NoError(suite.T(), err)
 	assert.EqualValues(suite.T(), "87e04946ff05ec28174aeb6f0e19f8295304a70f45f19bb3d915dc9aa6976587", decodedPayreq.DescriptionHash)
 
+	//Get metadata
+	req = httptest.NewRequest(http.MethodGet, "/v2/invoicemeta/"+decodedPayreq.PaymentHash+"?user="+suite.userLogin[3].Login, nil)
+	rec6 := httptest.NewRecorder()
+	suite.echo.ServeHTTP(rec6, req)
+	assert.Equal(suite.T(), http.StatusBadRequest, rec6.Code, "Should fail since the invoice is not settled yet")
+
 	//Repeated users Add up
 	const remainder = 0.03
 	amountmsats = 1000000
@@ -150,20 +159,20 @@ func (suite *LnurlTestSuite) TestLud6InvoiceWithMetadata() {
 	url := strings.Replace(metadata.URL(), suite.userLogin[3].Login, suite.userLogin[4].Login, -1)
 	url = strings.Replace(url, suite.userLogin[6].Login, suite.userLogin[5].Login, -1)
 	req = httptest.NewRequest(http.MethodGet, "/v2/invoice?"+url+"&amount="+strconv.Itoa(amountmsats), nil)
-	rec6 := httptest.NewRecorder()
-	suite.echo.ServeHTTP(rec6, req)
-	assert.Equal(suite.T(), http.StatusOK, rec6.Code)
-	assert.NoError(suite.T(), json.NewDecoder(rec6.Body).Decode(invoiceResponse))
+	rec7 := httptest.NewRecorder()
+	suite.echo.ServeHTTP(rec7, req)
+	assert.Equal(suite.T(), http.StatusOK, rec7.Code)
+	assert.NoError(suite.T(), json.NewDecoder(rec7.Body).Decode(invoiceResponse))
 	assert.Equal(suite.T(), 0, len(invoiceResponse.Routes))
 	decodedPayreq, err = suite.mlnd.DecodeBolt11(context.Background(), invoiceResponse.Payreq)
 	assert.NoError(suite.T(), err)
 	assert.EqualValues(suite.T(), "814261a99011a3367569953de2a1673fdb1a77b20649afb52136d49eb450304f", decodedPayreq.DescriptionHash)
 
 	//Lead user in secondary
-	rec7 := httptest.NewRecorder()
+	rec8 := httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodGet, "/v2/invoice?user="+suite.service.Config.HouseUser+"&memo="+memo, nil)
-	suite.echo.ServeHTTP(rec7, req)
-	assert.Equal(suite.T(), http.StatusBadRequest, rec7.Code)
+	suite.echo.ServeHTTP(rec8, req)
+	assert.Equal(suite.T(), http.StatusBadRequest, rec8.Code)
 
 }
 
@@ -176,9 +185,9 @@ func (suite *LnurlTestSuite) TestInternalSplitPayment() {
 	const sliceAcc1 = 0.38
 	const sliceAcc2 = 0.58
 	const amountmsats = 150000
-
+	const src = "yBXdmv7OrpSN2wTyB6puj0rj8bPZq0LJ"
 	metadata := &v2controllers.PaymentMetadata{
-		Source:  "",
+		Source:  src,
 		Authors: map[string]float64{suite.userLogin[1].Login: sliceAcc1, suite.userLogin[2].Login: sliceAcc2},
 	}
 	req := httptest.NewRequest(http.MethodGet, "/v2/invoice?"+metadata.URL()+"&amount="+strconv.Itoa(amountmsats), nil)
@@ -270,6 +279,24 @@ func (suite *LnurlTestSuite) TestInternalSplitPayment() {
 	assert.EqualValues(suite.T(), int(sliceAcc2*amountmsats/1000), invoicesResponse.Invoices[0].Amount)
 	balance = suite.getBalance(suite.userToken[2])
 	assert.EqualValues(suite.T(), sliceAcc2*amountmsats/1000, balance)
+
+	//Get metadata
+	invoiceMeta := &v2controllers.Invoice{}
+	req = httptest.NewRequest(http.MethodGet, "/v2/invoicemeta/"+decodedPayreq.PaymentHash+"?user="+suite.userLogin[1].Login, nil)
+	rec9 := httptest.NewRecorder()
+	suite.echo.ServeHTTP(rec9, req)
+	assert.Equal(suite.T(), http.StatusOK, rec9.Code, "Should not fail since the invoice is settled")
+
+	assert.NoError(suite.T(), json.NewDecoder(rec9.Body).Decode(invoiceMeta))
+	assert.Contains(suite.T(), invoiceMeta.CustomRecords, uint64(service.TLV_SPLIT_ID))
+	meta := v2controllers.PaymentMetadata{}
+	assert.True(suite.T(), json.Valid(invoiceMeta.CustomRecords[uint64(service.TLV_SPLIT_ID)]))
+	assert.NoError(suite.T(), json.Unmarshal(invoiceMeta.CustomRecords[uint64(service.TLV_SPLIT_ID)], &meta))
+	assert.EqualValues(suite.T(), 2, len(meta.Authors))
+	assert.EqualValues(suite.T(), metadata.Authors[suite.userLogin[1].Login], meta.Authors[suite.userLogin[1].Login])
+	assert.Equal(suite.T(), metadata.Source, meta.Source)
+	assert.Equal(suite.T(), common.InvoiceStateSettled, invoiceMeta.Status)
+	assert.EqualValues(suite.T(), 0, invoiceMeta.Amount)
 }
 
 func (suite *LnurlTestSuite) TestExternalSplitPayment() {
@@ -280,8 +307,9 @@ func (suite *LnurlTestSuite) TestExternalSplitPayment() {
 	const sliceAcc2 = 0.53
 	const amountmsats = 200000
 	const invoiceMemo = "TestExternalSplitPayment"
+	const src = "yBXdmv7OrpSN2wTyB6puj0rj8bPZq0LJ"
 	metadata := &v2controllers.PaymentMetadata{
-		Source:  "",
+		Source:  src,
 		Authors: map[string]float64{suite.userLogin[4].Login: sliceAcc1, suite.userLogin[5].Login: sliceAcc2},
 	}
 	req := httptest.NewRequest(http.MethodGet, "/v2/invoice?"+metadata.URL()+"&amount="+strconv.Itoa(amountmsats)+"&memo="+invoiceMemo, nil)
@@ -336,6 +364,24 @@ func (suite *LnurlTestSuite) TestExternalSplitPayment() {
 	assert.EqualValues(suite.T(), int(sliceAcc2*amountmsats/1000), invoicesResponse.Invoices[0].Amount)
 	balance = suite.getBalance(suite.userToken[5])
 	assert.EqualValues(suite.T(), sliceAcc2*amountmsats/1000, balance)
+
+	//Get metadata
+	invoiceMeta := &v2controllers.Invoice{}
+	req = httptest.NewRequest(http.MethodGet, "/v2/invoicemeta/"+decodedPayreq.PaymentHash+"?user="+suite.userLogin[5].Login, nil)
+	rec9 := httptest.NewRecorder()
+	suite.echo.ServeHTTP(rec9, req)
+	assert.Equal(suite.T(), http.StatusOK, rec9.Code, "Should not fail since the invoice is settled")
+
+	assert.NoError(suite.T(), json.NewDecoder(rec9.Body).Decode(invoiceMeta))
+	assert.Contains(suite.T(), invoiceMeta.CustomRecords, uint64(service.TLV_SPLIT_ID))
+	meta := v2controllers.PaymentMetadata{}
+	assert.True(suite.T(), json.Valid(invoiceMeta.CustomRecords[uint64(service.TLV_SPLIT_ID)]))
+	assert.NoError(suite.T(), json.Unmarshal(invoiceMeta.CustomRecords[uint64(service.TLV_SPLIT_ID)], &meta))
+	assert.EqualValues(suite.T(), 2, len(meta.Authors))
+	assert.EqualValues(suite.T(), metadata.Authors[suite.userLogin[5].Login], meta.Authors[suite.userLogin[5].Login])
+	assert.Equal(suite.T(), metadata.Source, meta.Source)
+	assert.Equal(suite.T(), common.InvoiceStateSettled, invoiceMeta.Status)
+	assert.EqualValues(suite.T(), 0, invoiceMeta.Amount)
 }
 func (suite *LnurlTestSuite) TestGetLnurlInvoiceZeroAmt() {
 	// call the lnurl endpoint

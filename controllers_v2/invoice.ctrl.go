@@ -150,8 +150,9 @@ type GetInvoicesResponseBody struct {
 // Lud6InvoiceResponseBody must comply with lud6
 // https://github.com/lnurl/luds/blob/luds/06.md
 type Lud6InvoiceResponseBody struct {
-	Payreq string   `json:"pr"`
-	Routes []string `json:"routes"`
+	Payreq      string   `json:"pr"`
+	Routes      []string `json:"routes"`
+	PaymentHash string   `json:"payment_hash" validate:"omitempty"` // custom field
 }
 
 type PaymentMetadata struct {
@@ -260,6 +261,56 @@ func (controller *InvoiceController) GetInvoice(c echo.Context) error {
 		ExpiresAt:       invoice.ExpiresAt.Time,
 		IsPaid:          invoice.State == common.InvoiceStateSettled,
 		Keysend:         invoice.Keysend,
+		CustomRecords:   invoice.DestinationCustomRecords,
+	}
+	return c.JSON(http.StatusOK, &responseBody)
+}
+
+// GetInvoice godoc
+// @Summary      Get a specific invoice
+// @Description  Retrieve metadata about a specific invoice by payment hash
+// @Accept       json
+// @Produce      json
+// @Tags         Invoice
+// @Param        payment_hash  path      string  true  "Payment hash"
+// @Success      200  {object}  Invoice
+// @Failure      400  {object}  responses.ErrorResponse
+// @Failure      500  {object}  responses.ErrorResponse
+// @Router       /v2/invoicemeta/{payment_hash} [get]
+// @Security     OAuth2Password
+func (controller *InvoiceController) GetInvoiceMeta(c echo.Context) error {
+	c.Response().Header().Set("Access-Control-Allow-Origin", "*")
+	c.Response().Header().Set("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept")
+	c.Response().Header().Set("Access-Control-Allow-Methods", "OPTIONS, GET")
+	if !c.QueryParams().Has("user") {
+		return c.JSON(http.StatusBadRequest, responses.BadArgumentsError)
+	}
+	userStr := c.QueryParam("user")
+	user, err := controller.svc.FindUserByLogin(c.Request().Context(), userStr)
+	if err != nil {
+		c.Logger().Errorf("Failed to find user by login: user %v error %v", user.ID, err)
+		return c.JSON(http.StatusBadRequest, responses.BadArgumentsError)
+	}
+
+	rHash := c.Param("payment_hash")
+	invoice, err := controller.svc.FindInvoiceByPaymentHash(c.Request().Context(), user.ID, rHash)
+	// Probably we did not find the invoice
+	if err != nil {
+		c.Logger().Errorf("Invalid invoices request user_id:%v payment_hash:%s", user.ID, rHash)
+		return c.JSON(http.StatusBadRequest, responses.BadArgumentsError)
+	}
+	if invoice.Type == common.InvoiceTypeSubinvoice && invoice.State != common.InvoiceStateSettled {
+		c.Logger().Info("Cannot show an open sub invoice to the user yet")
+		return c.JSON(http.StatusBadRequest, responses.BadArgumentsError)
+	}
+
+	responseBody := Invoice{
+		DescriptionHash: invoice.DescriptionHash,
+		Status:          invoice.State,
+		Type:            invoice.Type,
+		ErrorMessage:    invoice.ErrorMessage,
+		SettledAt:       invoice.SettledAt.Time,
+		ExpiresAt:       invoice.ExpiresAt.Time,
 		CustomRecords:   invoice.DestinationCustomRecords,
 	}
 	return c.JSON(http.StatusOK, &responseBody)
