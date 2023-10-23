@@ -30,12 +30,12 @@ var (
 	PRIV_KEY = []byte{8, 1, 18, 64, 250, 126, 64, 211, 185, 52, 213, 138, 129, 240, 49, 215, 8, 0, 143, 232, 142, 33, 34, 171, 16, 219, 41, 128, 102, 115, 188, 59, 39, 71, 124, 184, 234, 207, 90, 7, 190, 245, 13, 28, 12, 234, 139, 238, 38, 154, 82, 54, 239, 185, 155, 12, 144, 51, 65, 143, 172, 48, 165, 199, 34, 254, 25, 96}
 )
 
-type CreateUserV2TestSuite struct {
+type UsersTestSuite struct {
 	TestSuite
 	Service *service.LndhubService
 }
 
-func (suite *CreateUserV2TestSuite) SetupSuite() {
+func (suite *UsersTestSuite) SetupSuite() {
 	svc, err := LndHubTestServiceInit(newDefaultMockLND())
 	if err != nil {
 		log.Fatalf("Error initializing test service: %v", err)
@@ -46,10 +46,11 @@ func (suite *CreateUserV2TestSuite) SetupSuite() {
 	e.HTTPErrorHandler = responses.HTTPErrorHandler
 	e.Validator = &lib.CustomValidator{Validator: validator.New()}
 	suite.echo = e
-	suite.echo.POST("/v2/create", v2controllers.NewCreateUserController(suite.Service).CreateUser, security.SignatureMiddleware())
+	suite.echo.POST("/v2/create", v2controllers.NewUsersController(suite.Service).CreateUser, security.SignatureMiddleware())
+	suite.echo.GET("/v2/check", v2controllers.NewUsersController(suite.Service).CheckUsers)
 }
 
-func (suite *CreateUserV2TestSuite) TearDownTest() {
+func (suite *UsersTestSuite) TearDownTest() {
 	err := clearTable(suite.Service, "users")
 	if err != nil {
 		fmt.Printf("Tear down test error %v\n", err.Error())
@@ -57,7 +58,7 @@ func (suite *CreateUserV2TestSuite) TearDownTest() {
 	}
 }
 
-func (suite *CreateUserV2TestSuite) TestCreateAndChangeNickname() {
+func (suite *UsersTestSuite) TestCreateAndChangeNickname() {
 	e := echo.New()
 	e.HTTPErrorHandler = responses.HTTPErrorHandler
 
@@ -134,7 +135,7 @@ func (suite *CreateUserV2TestSuite) TestCreateAndChangeNickname() {
 	assert.EqualValues(suite.T(), hex.EncodeToString(messageSigned), responseBody.Password)
 }
 
-func (suite *CreateUserV2TestSuite) TestCreateWrongLogin() {
+func (suite *UsersTestSuite) TestCreateWrongLogin() {
 	e := echo.New()
 	e.HTTPErrorHandler = responses.HTTPErrorHandler
 
@@ -176,7 +177,7 @@ func (suite *CreateUserV2TestSuite) TestCreateWrongLogin() {
 	assert.EqualValues(suite.T(), "", user.Nickname)
 }
 
-func (suite *CreateUserV2TestSuite) TestCreateWrongSignature() {
+func (suite *UsersTestSuite) TestCreateWrongSignature() {
 	e := echo.New()
 	e.HTTPErrorHandler = responses.HTTPErrorHandler
 
@@ -210,7 +211,7 @@ func (suite *CreateUserV2TestSuite) TestCreateWrongSignature() {
 	assert.Equal(suite.T(), rec.Code, http.StatusUnauthorized)
 }
 
-func (suite *CreateUserV2TestSuite) TestCreateWithNoSignature() {
+func (suite *UsersTestSuite) TestCreateWithNoSignature() {
 	e := echo.New()
 	e.HTTPErrorHandler = responses.HTTPErrorHandler
 	e.Validator = &lib.CustomValidator{Validator: validator.New()}
@@ -235,7 +236,7 @@ func (suite *CreateUserV2TestSuite) TestCreateWithNoSignature() {
 	assert.EqualValues(suite.T(), testPassword, responseBody.Password)
 }
 
-func (suite *CreateUserV2TestSuite) TestCreateTakenUserNickname() {
+func (suite *UsersTestSuite) TestCreateTakenUserNickname() {
 	e := echo.New()
 	e.HTTPErrorHandler = responses.HTTPErrorHandler
 	e.Validator = &lib.CustomValidator{Validator: validator.New()}
@@ -339,7 +340,7 @@ func (suite *CreateUserV2TestSuite) TestCreateTakenUserNickname() {
 	assert.EqualValues(suite.T(), takenPassword, responseBody.Password)
 }
 
-func (suite *CreateUserV2TestSuite) TestCreateWrongNickname() {
+func (suite *UsersTestSuite) TestCreateWrongNickname() {
 	e := echo.New()
 	e.HTTPErrorHandler = responses.HTTPErrorHandler
 	e.Validator = &lib.CustomValidator{Validator: validator.New()}
@@ -359,6 +360,57 @@ func (suite *CreateUserV2TestSuite) TestCreateWrongNickname() {
 	assert.Equal(suite.T(), http.StatusBadRequest, rec.Code)
 }
 
+func (suite *UsersTestSuite) TestCheckUsers() {
+	e := echo.New()
+	e.HTTPErrorHandler = responses.HTTPErrorHandler
+
+	var buf bytes.Buffer
+	e.Validator = &lib.CustomValidator{Validator: validator.New()}
+	priv, err := crypto.UnmarshalPrivateKey(PRIV_KEY)
+	assert.NoError(suite.T(), err)
+	pub := priv.GetPublic().(*crypto.Ed25519PublicKey)
+	pubBytes, _ := pub.Raw()
+	messageSigned, err := priv.Sign([]byte(security.LOGIN_MESSAGE))
+	assert.NoError(suite.T(), err)
+
+	pub_bytes, err := pub.Raw()
+	assert.NoError(suite.T(), err)
+	pubKey, err := crypto.UnmarshalEd25519PublicKey(pub_bytes)
+	assert.NoError(suite.T(), err)
+	principal, err := security.PrincipalFromPubKey(pubKey)
+	assert.NoError(suite.T(), err)
+	testLogin := principal.String()
+
+	assert.NoError(suite.T(), json.NewEncoder(&buf).Encode(&ExpectedCreateUserRequestBody{
+		Login:    testLogin,
+		Password: hex.EncodeToString(messageSigned),
+	}))
+	req := httptest.NewRequest(http.MethodPost, "/v2/create", &buf)
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", hex.EncodeToString(pubBytes)))
+	rec := httptest.NewRecorder()
+	suite.echo.ServeHTTP(rec, req)
+	responseBody := ExpectedCreateUserRequestBody{}
+	assert.Equal(suite.T(), http.StatusOK, rec.Code)
+	assert.NoError(suite.T(), json.NewDecoder(rec.Body).Decode(&responseBody))
+	assert.EqualValues(suite.T(), testLogin, responseBody.Login)
+	assert.EqualValues(suite.T(), "", responseBody.Nickname)
+	assert.EqualValues(suite.T(), hex.EncodeToString(messageSigned), responseBody.Password)
+	user, err := suite.Service.FindUserByLoginOrNickname(context.Background(), testLogin)
+	assert.NoError(suite.T(), err)
+	assert.Equal(suite.T(), testLogin, user.Login)
+
+	validUsers := v2controllers.CheckUsersResponseBody{}
+	req2 := httptest.NewRequest(http.MethodGet, "/v2/check?user="+testLogin+"&user=fakeuser", nil)
+	req2.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec2 := httptest.NewRecorder()
+	suite.echo.ServeHTTP(rec2, req2)
+	assert.Equal(suite.T(), http.StatusOK, rec2.Code)
+	assert.NoError(suite.T(), json.NewDecoder(rec2.Body).Decode(&validUsers))
+	assert.Len(suite.T(), validUsers.ExistingUsers, 1)
+	assert.Equal(suite.T(), testLogin, validUsers.ExistingUsers[0])
+}
+
 func TestCreateUserV2TestSuite(t *testing.T) {
-	suite.Run(t, new(CreateUserV2TestSuite))
+	suite.Run(t, new(UsersTestSuite))
 }

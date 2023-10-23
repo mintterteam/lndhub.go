@@ -13,8 +13,9 @@ func RegisterV2Endpoints(svc *service.LndhubService, e *echo.Echo, tokenMW, stri
 	securedWithStrictRateLimit := e.Group("", tokenMW, strictRateLimitPerMinMW, strictRateLimitPerSecMW)
 	secured := e.Group("", tokenMW, rateLimitPerMinMW, rateLimitPerSecMW)
 	if svc.Config.AllowAccountCreation {
-		e.POST("/v2/create", v2controllers.NewCreateUserController(svc).CreateUser, strictRateLimitPerMinMW, strictRateLimitPerSecMW, signatureMW)
+		e.POST("/v2/create", v2controllers.NewUsersController(svc).CreateUser, strictRateLimitPerMinMW, strictRateLimitPerSecMW, signatureMW)
 	}
+	e.GET("/v2/check", v2controllers.NewUsersController(svc).CheckUsers, rateLimitPerMinMW, rateLimitPerSecMW)
 	e.GET("/v2/lnurlp/:user", v2controllers.NewLnurlController(svc).Lnurlp, strictRateLimitPerMinMW, strictRateLimitPerSecMW)
 	invoiceCtrl := v2controllers.NewInvoiceController(svc)
 	keysendCtrl := v2controllers.NewKeySendController(svc)

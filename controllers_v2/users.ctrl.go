@@ -9,13 +9,13 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
-// CreateUserController : Create user controller struct
-type CreateUserController struct {
+// UsersController : Create user controller struct
+type UsersController struct {
 	svc *service.LndhubService
 }
 
-func NewCreateUserController(svc *service.LndhubService) *CreateUserController {
-	return &CreateUserController{svc: svc}
+func NewUsersController(svc *service.LndhubService) *UsersController {
+	return &UsersController{svc: svc}
 }
 
 type CreateUserResponseBody struct {
@@ -40,7 +40,7 @@ type CreateUserRequestBody struct {
 // @Failure      400      {object}  responses.ErrorResponse
 // @Failure      500      {object}  responses.ErrorResponse
 // @Router       /v2/users [post]
-func (controller *CreateUserController) CreateUser(c echo.Context) error {
+func (controller *UsersController) CreateUser(c echo.Context) error {
 
 	var body CreateUserRequestBody
 
@@ -72,4 +72,41 @@ func (controller *CreateUserController) CreateUser(c echo.Context) error {
 	ResponseBody.Nickname = user.Nickname
 
 	return c.JSON(http.StatusOK, &ResponseBody)
+}
+
+type CheckUsersResponseBody struct {
+	ExistingUsers []string `json:"existing_users"`
+}
+
+// CheckUsers godoc
+// @Summary      Check if a list of users exist in the database.
+// @Description  In order to know beforehand if the payment is going to succeed, the client should check that all users involved exists.
+// @Accept       json
+// @Produce      json
+// @Tags         CheckUsers
+// @Param        account  body      CheckUsersRequestBody  false  "Check User"
+// @Success      200      {object}  CheckUsersResponseBody
+// @Failure      400      {object}  responses.ErrorResponse
+// @Failure      500      {object}  responses.ErrorResponse
+// @Router       /v2/users [get]
+func (controller *UsersController) CheckUsers(c echo.Context) error {
+	// The user param could be userID (login) or a nickname (lnaddress)
+	c.Response().Header().Set("Access-Control-Allow-Origin", "*")
+	c.Response().Header().Set("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept")
+	c.Response().Header().Set("Access-Control-Allow-Methods", "OPTIONS, GET")
+	if !c.QueryParams().Has("user") {
+		c.Logger().Errorf("user mandatory param in query URL")
+		return c.JSON(http.StatusBadRequest, responses.LnurlpBadArgumentsError)
+	}
+	responseBody := CheckUsersResponseBody{}
+	for _, user := range c.QueryParams()["user"] {
+		_, err := controller.svc.FindUserByLoginOrNickname(c.Request().Context(), user)
+		if err != nil {
+			c.Logger().Errorf("Failed to find user by login or nickname: user %v error %v", user, err)
+			continue
+		}
+		responseBody.ExistingUsers = append(responseBody.ExistingUsers, user)
+	}
+
+	return c.JSON(http.StatusOK, &responseBody)
 }
