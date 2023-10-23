@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -78,8 +77,6 @@ func (controller *InvoiceController) Lud6Invoice(c echo.Context) error {
 	}
 	captable := service.Captable{LeadingUserID: houseUser.ID, SecondaryUsers: map[int64]float64{}}
 	c.Request().ParseForm()
-	params := c.Request().Form
-	fmt.Println(params)
 	for _, slice := range c.QueryParams()["user"] {
 		authorSlice := strings.Split(slice, ",")
 		user, err := controller.svc.FindUserByLoginOrNickname(c.Request().Context(), authorSlice[0])

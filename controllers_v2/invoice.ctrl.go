@@ -104,7 +104,7 @@ func (controller *InvoiceController) GetIncomingInvoices(c echo.Context) error {
 
 	response := []Invoice{}
 	for _, invoice := range invoices {
-		// not allowing the to view open subinvoices because they cannot be externally settled.
+		// not allowing to view open subinvoices because they cannot be externally settled.
 		if invoice.Type == common.InvoiceTypeSubinvoice && invoice.State != common.InvoiceStateSettled {
 			continue
 		}
