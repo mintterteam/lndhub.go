@@ -15,11 +15,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/crypto"
 )
 
-const (
-	LOGIN_MESSAGE = "sign in into mintter lndhub"
-)
-
-func SignatureMiddleware() echo.MiddlewareFunc {
+func SignatureMiddleware(loginMessage string) echo.MiddlewareFunc {
 	config := middleware.DefaultKeyAuthConfig
 	config.ErrorHandler = func(err error, c echo.Context) error {
 		c.Logger().Error(err)
@@ -29,12 +25,15 @@ func SignatureMiddleware() echo.MiddlewareFunc {
 			"message": "bad signature authentication: " + err.Error(),
 		})
 	}
-	config.Validator = validate_signature
-	config.Skipper = check_skip
+
+	config.Validator = func(pubKeyStr string, c echo.Context) (bool, error) {
+		return validateSignature(pubKeyStr, loginMessage, c)
+	}
+	config.Skipper = checkSkip
 	return middleware.KeyAuthWithConfig(config)
 }
 
-func check_skip(c echo.Context) bool {
+func checkSkip(c echo.Context) bool {
 	login, err := readFromBody(&c.Request().Body, "login")
 	if err != nil {
 		c.Logger().Debugf("could not read body %v", err)
@@ -51,7 +50,7 @@ func check_skip(c echo.Context) bool {
 	return false
 }
 
-func validate_signature(pubKeyStr string, c echo.Context) (bool, error) {
+func validateSignature(pubKeyStr, loginMessage string, c echo.Context) (bool, error) {
 	// check proper headers
 	v, ok := c.Request().Header[echo.HeaderAuthorization]
 	if !ok || len(v) != 1 || !strings.Contains(strings.ToLower(v[0]),
@@ -99,7 +98,8 @@ func validate_signature(pubKeyStr string, c echo.Context) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("Unable to unmarshal signature [%s]: %v", password, err)
 	}
-	sig_ok, err := pubKey.Verify([]byte(LOGIN_MESSAGE), signature)
+
+	sig_ok, err := pubKey.Verify([]byte(loginMessage), signature)
 	if err != nil {
 		return false, fmt.Errorf("Unable to verify signature")
 	}

@@ -45,7 +45,8 @@ type Config struct {
 	RabbitMQUri                      string  `envconfig:"RABBITMQ_URI"`
 	RabbitMQLndhubInvoiceExchange    string  `envconfig:"RABBITMQ_INVOICE_EXCHANGE" default:"lndhub_invoice"`
 	LnurlDomain                      string  `envconfig:"LNURL_DOMAIN" default:"ln.example.com"`
-	HouseUser                        string  `envconfig:"LNURL_HOUSE_NICKNAME" default:"6CXQAGHM52tYlpysOSry"`
+	HouseUser                        string  `envconfig:"LNURL_HOUSE_NICKNAME" default:"6CXQAGHM52tYlpysOSry"` // Collects the remainders of splitting payments.
+	LoginMessage                     string  `envconfig:"LOGIN_MESSAGE" default:"sign in into lndhub"`         // in seconds, default 2 days
 	RabbitMQLndInvoiceExchange       string  `envconfig:"RABBITMQ_LND_INVOICE_EXCHANGE" default:"lnd_invoice"`
 	RabbitMQInvoiceConsumerQueueName string  `envconfig:"RABBITMQ_INVOICE_CONSUMER_QUEUE_NAME" default:"lnd_invoice_consumer"`
 	SubscriptionConsumerType         string  `envconfig:"SUBSCRIPTION_CONSUMER_TYPE" default:"grpc"`

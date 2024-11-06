@@ -30,6 +30,10 @@ var (
 	PRIV_KEY = []byte{8, 1, 18, 64, 250, 126, 64, 211, 185, 52, 213, 138, 129, 240, 49, 215, 8, 0, 143, 232, 142, 33, 34, 171, 16, 219, 41, 128, 102, 115, 188, 59, 39, 71, 124, 184, 234, 207, 90, 7, 190, 245, 13, 28, 12, 234, 139, 238, 38, 154, 82, 54, 239, 185, 155, 12, 144, 51, 65, 143, 172, 48, 165, 199, 34, 254, 25, 96}
 )
 
+const (
+	SIGNING_PHRASE = "sign in into lndhub for testing!"
+)
+
 type UsersTestSuite struct {
 	TestSuite
 	Service *service.LndhubService
@@ -46,7 +50,7 @@ func (suite *UsersTestSuite) SetupSuite() {
 	e.HTTPErrorHandler = responses.HTTPErrorHandler
 	e.Validator = &lib.CustomValidator{Validator: validator.New()}
 	suite.echo = e
-	suite.echo.POST("/v2/create", v2controllers.NewUsersController(suite.Service).CreateUser, security.SignatureMiddleware())
+	suite.echo.POST("/v2/create", v2controllers.NewUsersController(suite.Service).CreateUser, security.SignatureMiddleware(SIGNING_PHRASE))
 	suite.echo.GET("/v2/check", v2controllers.NewUsersController(suite.Service).CheckUsers)
 }
 
@@ -68,7 +72,7 @@ func (suite *UsersTestSuite) TestCreateAndChangeNickname() {
 	assert.NoError(suite.T(), err)
 	pub := priv.GetPublic().(*crypto.Ed25519PublicKey)
 	pubBytes, _ := pub.Raw()
-	messageSigned, err := priv.Sign([]byte(security.LOGIN_MESSAGE))
+	messageSigned, err := priv.Sign([]byte(SIGNING_PHRASE))
 	assert.NoError(suite.T(), err)
 
 	pub_bytes, err := pub.Raw()
@@ -145,7 +149,7 @@ func (suite *UsersTestSuite) TestCreateWrongLogin() {
 	assert.NoError(suite.T(), err)
 	pub := priv.GetPublic().(*crypto.Ed25519PublicKey)
 	pubBytes, _ := pub.Raw()
-	messageSigned, err := priv.Sign([]byte(security.LOGIN_MESSAGE))
+	messageSigned, err := priv.Sign([]byte(SIGNING_PHRASE))
 	assert.NoError(suite.T(), err)
 
 	pub_bytes, err := pub.Raw()
@@ -370,7 +374,7 @@ func (suite *UsersTestSuite) TestCheckUsers() {
 	assert.NoError(suite.T(), err)
 	pub := priv.GetPublic().(*crypto.Ed25519PublicKey)
 	pubBytes, _ := pub.Raw()
-	messageSigned, err := priv.Sign([]byte(security.LOGIN_MESSAGE))
+	messageSigned, err := priv.Sign([]byte(SIGNING_PHRASE))
 	assert.NoError(suite.T(), err)
 
 	pub_bytes, err := pub.Raw()

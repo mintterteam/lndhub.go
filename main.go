@@ -52,8 +52,8 @@ var staticContent embed.FS
 // @description  Accounting wrapper for the Lightning Network providing separate accounts for end-users.
 
 // @contact.name   Alby
-// @contact.url    https://mintter.com
-// @contact.email  team@mintter.com
+// @contact.url    https://seedhypermedia.com
+// @contact.email  team@seedhypermedia.com
 
 // @license.name  GNU GPLv3
 // @license.url   https://www.gnu.org/licenses/gpl-3.0.en.html
@@ -196,7 +196,7 @@ func main() {
 	regularRateLimitPerSecMW := createRateLimitMiddleware(c.DefaultRateLimitPerSec, 1*time.Second)
 	tokenMW := tokens.Middleware(c.JWTSecret)
 	RegisterLegacyEndpoints(svc, e, tokenMW, strictRateLimitPerMinMW, strictRateLimitPerSecMW, regularRateLimitPerMinMW, regularRateLimitPerSecMW, tokens.AdminTokenMiddleware(c.AdminToken))
-	RegisterV2Endpoints(svc, e, tokenMW, strictRateLimitPerMinMW, strictRateLimitPerSecMW, regularRateLimitPerMinMW, regularRateLimitPerSecMW, security.SignatureMiddleware())
+	RegisterV2Endpoints(svc, e, tokenMW, strictRateLimitPerMinMW, strictRateLimitPerSecMW, regularRateLimitPerMinMW, regularRateLimitPerSecMW, security.SignatureMiddleware(svc.Config.LoginMessage))
 
 	//Swagger API spec
 	docs.SwaggerInfo.Host = c.Host

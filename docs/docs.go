@@ -12,8 +12,8 @@ const docTemplate = `{
         "title": "{{.Title}}",
         "contact": {
             "name": "Alby",
-            "url": "https://mintter.com",
-            "email": "team@mintter.com"
+            "url": "https://seedhypermedia.com",
+            "email": "team@seedhypermedia.com"
         },
         "license": {
             "name": "GNU GPLv3",

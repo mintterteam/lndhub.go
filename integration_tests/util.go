@@ -47,6 +47,7 @@ func LndHubTestServiceInit(lndClientMock lnd.LightningClientWrapper) (svc *servi
 		MaxSendAmount:           100000,
 		LnurlDomain:             "testnet.example.com",
 		HouseUser:               "6CXQAGHM52tYlpysOSry",
+		LoginMessage:            "sign in into lndhub",
 	}
 
 	rabbitmqUri, ok := os.LookupEnv("RABBITMQ_URI")
