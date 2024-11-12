@@ -31,13 +31,14 @@ func (svc *LndhubService) CreateUser(ctx context.Context, login, password, nickn
 	}
 
 	// generate user login/password if not provided
-	user.Login = login
 	if login == "" {
 		randLoginBytes, err := randBytesFromStr(20, alphaNumBytes)
 		if err != nil {
 			return nil, err
 		}
 		user.Login = string(randLoginBytes)
+	} else {
+		user.Login = login
 	}
 
 	// login must be unique across nickname column as well

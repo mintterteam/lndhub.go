@@ -39,7 +39,7 @@ type CreateUserRequestBody struct {
 // @Success      200      {object}  CreateUserResponseBody
 // @Failure      400      {object}  responses.ErrorResponse
 // @Failure      500      {object}  responses.ErrorResponse
-// @Router       /v2/users [post]
+// @Router       /v2/create [post]
 func (controller *UsersController) CreateUser(c echo.Context) error {
 
 	var body CreateUserRequestBody
@@ -88,7 +88,7 @@ type CheckUsersResponseBody struct {
 // @Success      200      {object}  CheckUsersResponseBody
 // @Failure      400      {object}  responses.ErrorResponse
 // @Failure      500      {object}  responses.ErrorResponse
-// @Router       /v2/users [get]
+// @Router       /v2/check [get]
 func (controller *UsersController) CheckUsers(c echo.Context) error {
 	// The user param could be userID (login) or a nickname (lnaddress)
 	c.Response().Header().Set("Access-Control-Allow-Origin", "*")
