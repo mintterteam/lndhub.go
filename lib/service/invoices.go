@@ -58,7 +58,7 @@ func (svc *LndhubService) FindInvoiceByPaymentHashAndUser(ctx context.Context, u
 
 func (svc *LndhubService) FindInvoicesByPaymentHash(ctx context.Context, rHash string) ([]models.Invoice, error) {
 	invoices := []models.Invoice{}
-	err := svc.DB.NewSelect().Model(&invoices).Where("invoice.user_id = ?", rHash).Scan(ctx)
+	err := svc.DB.NewSelect().Model(&invoices).Where("invoice.r_hash = ?", rHash).Scan(ctx)
 	if err != nil {
 		return invoices, err
 	}
