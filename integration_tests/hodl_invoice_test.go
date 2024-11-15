@@ -110,7 +110,7 @@ func (suite *HodlInvoiceSuite) TestHodlInvoice() {
 	assert.Equal(suite.T(), int64(userFundingSats-externalSatRequested), userBalance)
 
 	// check payment is pending
-	inv, err := suite.service.FindInvoiceByPaymentHash(context.Background(), userId, hex.EncodeToString(invoice.RHash))
+	inv, err := suite.service.FindInvoiceByPaymentHashAndUser(context.Background(), userId, hex.EncodeToString(invoice.RHash))
 	assert.NoError(suite.T(), err)
 	assert.Equal(suite.T(), common.InvoiceStateInitialized, inv.State)
 
@@ -177,7 +177,7 @@ func (suite *HodlInvoiceSuite) TestHodlInvoice() {
 	// wait for payment to be updated as pending in database
 	time.Sleep(3 * time.Second)
 	// check payment is pending
-	inv, err = suite.service.FindInvoiceByPaymentHash(context.Background(), userId, hex.EncodeToString(invoice.RHash))
+	inv, err = suite.service.FindInvoiceByPaymentHashAndUser(context.Background(), userId, hex.EncodeToString(invoice.RHash))
 	assert.NoError(suite.T(), err)
 	assert.Equal(suite.T(), common.InvoiceStateInitialized, inv.State)
 	//start payment checking loop
@@ -211,7 +211,7 @@ func (suite *HodlInvoiceSuite) TestHodlInvoice() {
 	assert.NoError(suite.T(), err)
 	assert.Equal(suite.T(), int64(userFundingSats-externalSatRequested), userBalance)
 	// check payment is updated as successful
-	inv, err = suite.service.FindInvoiceByPaymentHash(context.Background(), userId, hex.EncodeToString(invoice.RHash))
+	inv, err = suite.service.FindInvoiceByPaymentHashAndUser(context.Background(), userId, hex.EncodeToString(invoice.RHash))
 	assert.NoError(suite.T(), err)
 	assert.Equal(suite.T(), common.InvoiceStateSettled, inv.State)
 	clearTable(suite.service, "invoices")

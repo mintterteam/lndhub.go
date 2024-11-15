@@ -235,7 +235,7 @@ func (controller *InvoiceController) AddInvoice(c echo.Context) error {
 func (controller *InvoiceController) GetInvoice(c echo.Context) error {
 	userID := c.Get("UserID").(int64)
 	rHash := c.Param("payment_hash")
-	invoice, err := controller.svc.FindInvoiceByPaymentHash(c.Request().Context(), userID, rHash)
+	invoice, err := controller.svc.FindInvoiceByPaymentHashAndUser(c.Request().Context(), userID, rHash)
 	// Probably we did not find the invoice
 	if err != nil {
 		c.Logger().Errorf("Invalid invoices request user_id:%v payment_hash:%s", userID, rHash)
@@ -282,8 +282,29 @@ func (controller *InvoiceController) GetInvoiceMeta(c echo.Context) error {
 	c.Response().Header().Set("Access-Control-Allow-Origin", "*")
 	c.Response().Header().Set("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept")
 	c.Response().Header().Set("Access-Control-Allow-Methods", "OPTIONS, GET")
+
+	rHash := c.Param("payment_hash")
+	responseBody := []Invoice{}
 	if !c.QueryParams().Has("user") {
-		return c.JSON(http.StatusBadRequest, responses.BadArgumentsError)
+		invoices, err := controller.svc.FindInvoicesByPaymentHash(c.Request().Context(), rHash)
+		// Probably we did not find the invoice
+		if err != nil {
+			c.Logger().Errorf("Invalid invoices request payment_hash:%s", rHash)
+			return c.JSON(http.StatusBadRequest, responses.BadArgumentsError)
+		}
+		for _, invoice := range invoices {
+			responseBody = append(responseBody, Invoice{
+				DescriptionHash: invoice.DescriptionHash,
+				Status:          invoice.State,
+				Type:            invoice.Type,
+				ErrorMessage:    invoice.ErrorMessage,
+				SettledAt:       invoice.SettledAt.Time,
+				ExpiresAt:       invoice.ExpiresAt.Time,
+				CustomRecords:   invoice.DestinationCustomRecords,
+			})
+			return c.JSON(http.StatusOK, &responseBody)
+		}
+
 	}
 	userStr := c.QueryParam("user")
 	user, err := controller.svc.FindUserByLogin(c.Request().Context(), userStr)
@@ -292,19 +313,14 @@ func (controller *InvoiceController) GetInvoiceMeta(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, responses.BadArgumentsError)
 	}
 
-	rHash := c.Param("payment_hash")
-	invoice, err := controller.svc.FindInvoiceByPaymentHash(c.Request().Context(), user.ID, rHash)
+	invoice, err := controller.svc.FindInvoiceByPaymentHashAndUser(c.Request().Context(), user.ID, rHash)
 	// Probably we did not find the invoice
 	if err != nil {
 		c.Logger().Errorf("Invalid invoices request user_id:%v payment_hash:%s", user.ID, rHash)
 		return c.JSON(http.StatusBadRequest, responses.BadArgumentsError)
 	}
-	if invoice.Type == common.InvoiceTypeSubinvoice && invoice.State != common.InvoiceStateSettled {
-		c.Logger().Info("Cannot show an open sub invoice to the user yet")
-		return c.JSON(http.StatusBadRequest, responses.BadArgumentsError)
-	}
 
-	responseBody := Invoice{
+	responseBody = append(responseBody, Invoice{
 		DescriptionHash: invoice.DescriptionHash,
 		Status:          invoice.State,
 		Type:            invoice.Type,
@@ -312,6 +328,6 @@ func (controller *InvoiceController) GetInvoiceMeta(c echo.Context) error {
 		SettledAt:       invoice.SettledAt.Time,
 		ExpiresAt:       invoice.ExpiresAt.Time,
 		CustomRecords:   invoice.DestinationCustomRecords,
-	}
+	})
 	return c.JSON(http.StatusOK, &responseBody)
 }

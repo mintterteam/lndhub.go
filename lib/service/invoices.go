@@ -46,7 +46,7 @@ type Captable struct {
 	SecondaryUsers map[int64]float64
 }
 
-func (svc *LndhubService) FindInvoiceByPaymentHash(ctx context.Context, userId int64, rHash string) (*models.Invoice, error) {
+func (svc *LndhubService) FindInvoiceByPaymentHashAndUser(ctx context.Context, userId int64, rHash string) (*models.Invoice, error) {
 	var invoice models.Invoice
 
 	err := svc.DB.NewSelect().Model(&invoice).Where("invoice.user_id = ? AND invoice.r_hash = ?", userId, rHash).Limit(1).Scan(ctx)
@@ -54,6 +54,15 @@ func (svc *LndhubService) FindInvoiceByPaymentHash(ctx context.Context, userId i
 		return &invoice, err
 	}
 	return &invoice, nil
+}
+
+func (svc *LndhubService) FindInvoicesByPaymentHash(ctx context.Context, rHash string) ([]models.Invoice, error) {
+	invoices := []models.Invoice{}
+	err := svc.DB.NewSelect().Model(&invoices).Where("invoice.user_id = ?", rHash).Scan(ctx)
+	if err != nil {
+		return invoices, err
+	}
+	return invoices, nil
 }
 
 func (svc *LndhubService) SendInternalPayment(ctx context.Context, invoice *models.Invoice) (sendPaymentResponse SendPaymentResponse, err error) {

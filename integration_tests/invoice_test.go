@@ -90,14 +90,14 @@ func (suite *InvoiceTestSuite) TestGetInvoiceMetadata() {
 	invoice := suite.createInvoiceReq(358, "My invoice", user.Login)
 
 	// check if we can get the invoice
-	invoiceResponse := &v2controllers.Invoice{}
+	invoiceResponse := []v2controllers.Invoice{}
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/v2/invoicemeta/"+invoice.RHash+"?user="+user.Login, nil)
 	suite.echo.ServeHTTP(rec, req)
 	assert.Equal(suite.T(), http.StatusOK, rec.Code)
-	assert.NoError(suite.T(), json.NewDecoder(rec.Body).Decode(invoiceResponse))
-	assert.Equal(suite.T(), common.InvoiceStateOpen, invoiceResponse.Status)
-	assert.EqualValues(suite.T(), 0, invoiceResponse.Amount)
+	assert.NoError(suite.T(), json.NewDecoder(rec.Body).Decode(&invoiceResponse))
+	assert.Equal(suite.T(), common.InvoiceStateOpen, invoiceResponse[0].Status)
+	assert.EqualValues(suite.T(), 0, invoiceResponse[0].Amount)
 }
 
 func (suite *InvoiceTestSuite) TestAddInvoiceForNonExistingUser() {
