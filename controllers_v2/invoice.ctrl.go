@@ -302,9 +302,8 @@ func (controller *InvoiceController) GetInvoiceMeta(c echo.Context) error {
 				ExpiresAt:       invoice.ExpiresAt.Time,
 				CustomRecords:   invoice.DestinationCustomRecords,
 			})
-			return c.JSON(http.StatusOK, &responseBody)
 		}
-
+		return c.JSON(http.StatusOK, &responseBody)
 	}
 	userStr := c.QueryParam("user")
 	user, err := controller.svc.FindUserByLogin(c.Request().Context(), userStr)
