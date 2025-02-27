@@ -449,7 +449,7 @@ func (svc *LndhubService) AddOutgoingInvoice(ctx context.Context, userID int64, 
 func (svc *LndhubService) SplitIncomingPayment(ctx context.Context, captable Captable) error {
 	for user, slice := range captable.SecondaryUsers {
 		if user == captable.LeadingUserID {
-			svc.Logger.Debug(responses.LeadAuthorIncludedError.Error())
+			svc.Logger.Error(responses.LeadAuthorIncludedError.Error())
 			return responses.LeadAuthorIncludedError
 		}
 		internalInvoice := models.Invoice{
@@ -468,8 +468,11 @@ func (svc *LndhubService) SplitIncomingPayment(ctx context.Context, captable Cap
 		}
 
 		if _, err := svc.DB.NewInsert().Model(&internalInvoice).Exec(ctx); err != nil {
+			svc.Logger.Error(responses.LeadAuthorIncludedError.Error())
 			return err
 		}
+		svc.Logger.Infof("Adding Child invoice. userID [%v] invoiceID [%v] value [%v] description_hash [%s] memo [%s] captable [%v]", internalInvoice.UserID, internalInvoice.ID, internalInvoice.Amount, internalInvoice.DescriptionHash, internalInvoice.Memo, captable)
+
 	}
 	return nil
 }

@@ -202,7 +202,7 @@ func (controller *InvoiceController) AddInvoice(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, responses.BadArgumentsError)
 	}
 
-	c.Logger().Infof("Adding invoice: user_id:%v memo:%s value:%v description_hash:%s, documentID: %s, authors: %s",
+	controller.svc.Logger.Infof("Adding invoice: user_id:%v memo:%s value:%v description_hash:%s",
 		userID, body.Description, body.Amount, body.DescriptionHash)
 
 	invoice, err := controller.svc.AddIncomingInvoice(c.Request().Context(), userID, body.Amount, body.Description, body.DescriptionHash)
@@ -242,7 +242,7 @@ func (controller *InvoiceController) GetInvoice(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, responses.BadArgumentsError)
 	}
 	if invoice.Type == common.InvoiceTypeSubinvoice && invoice.State != common.InvoiceStateSettled {
-		c.Logger().Info("Cannot show an open sub invoice to the user yet")
+		controller.svc.Logger.Info("Cannot show an open sub invoice to the user yet")
 		return c.JSON(http.StatusBadRequest, responses.BadArgumentsError)
 	}
 	responseBody := Invoice{

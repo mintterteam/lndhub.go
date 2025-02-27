@@ -71,7 +71,7 @@ func AddInvoice(c echo.Context, svc *service.LndhubService, userID int64) error 
 		}
 	}
 
-	c.Logger().Infof("Adding invoice: user_id:%v memo:%s value:%v description_hash:%s", userID, body.Memo, amount, body.DescriptionHash)
+	svc.Logger.Infof("Adding invoice: user_id:%v memo:%s value:%v description_hash:%s", userID, body.Memo, amount, body.DescriptionHash)
 
 	invoice, err := svc.AddIncomingInvoice(c.Request().Context(), userID, amount, body.Memo, body.DescriptionHash)
 	if err != nil {

@@ -86,13 +86,13 @@ func (controller *InvoiceController) Lud6Invoice(c echo.Context) error {
 		}
 		users = append(users, user)
 		if len(authorSlice) > 2 {
-			c.Logger().Debugf("user param must be in the format <id>,<floatauthorship> or <id>, got %s", slice)
+			controller.svc.Logger.Debugf("user param must be in the format <id>,<floatauthorship> or <id>, got %s", slice)
 			return c.JSON(http.StatusBadRequest, responses.LnurlpBadArgumentsError)
 		}
 		authorship := 1.0 - float64(SERVICE_CUT_BPS)/10000
 		if len(authorSlice) == 2 {
 			if authorship, err = strconv.ParseFloat(authorSlice[1], 64); err != nil {
-				c.Logger().Debugf("Could not parse authorship from user: %v", c.QueryParams()["user"])
+				controller.svc.Logger.Debugf("Could not parse authorship from user: %v", c.QueryParams()["user"])
 				return c.JSON(http.StatusBadRequest, responses.LnurlpBadArgumentsError)
 			}
 		}
@@ -107,7 +107,7 @@ func (controller *InvoiceController) Lud6Invoice(c echo.Context) error {
 		}
 	}
 	if cumulativeAuthorship > 1 {
-		c.Logger().Debugf("Slices added up more than 1: %v", cumulativeAuthorship)
+		controller.svc.Logger.Debugf("Slices added up more than 1: %v", cumulativeAuthorship)
 		return c.JSON(http.StatusBadRequest, responses.LnurlpBadArgumentsError)
 	}
 
@@ -117,7 +117,7 @@ func (controller *InvoiceController) Lud6Invoice(c echo.Context) error {
 
 	records, err := json.Marshal(paymentMeta)
 	if err != nil {
-		c.Logger().Debugf("Could not parse to json: %v", paymentMeta)
+		controller.svc.Logger.Debugf("Could not parse to json: %v", paymentMeta)
 		return c.JSON(http.StatusBadRequest, responses.LnurlpBadArgumentsError)
 	}
 	var amt_msat int64 = -1
@@ -148,14 +148,14 @@ func (controller *InvoiceController) Lud6Invoice(c echo.Context) error {
 		descriptionhash_string = hex.EncodeToString(descriptionhash_hex[:])
 	}
 
-	c.Logger().Infof("Adding invoice: value:%v description_hash:%s memo:%s", amt_msat/1000, descriptionhash_string, memo)
-
 	invoice, err := controller.svc.AddIncomingInvoice(c.Request().Context(), captable.LeadingUserID, amt_msat/1000, memo, descriptionhash_string, records...)
 	if err != nil {
 		c.Logger().Errorf("Error creating invoice: %v", err)
 		sentry.CaptureException(err)
 		return c.JSON(http.StatusBadRequest, responses.LnurlpBadArgumentsError)
 	}
+	controller.svc.Logger.Infof("Adding Parent invoice. userID [%v] invoiceID [%v] value [%v] description_hash [%s] memo [%s] captable [%v]", invoice.UserID, invoice.ID, invoice.Amount, invoice.DescriptionHash, invoice.Memo, captable)
+
 	responseBody := Lud6InvoiceResponseBody{}
 	responseBody.Payreq = invoice.PaymentRequest
 	responseBody.PaymentHash = invoice.RHash
