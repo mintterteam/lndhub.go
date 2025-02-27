@@ -84,6 +84,7 @@ func (svc *LndhubService) SendInternalPayment(ctx context.Context, invoice *mode
 			return sendPaymentResponse, err
 		}
 	}
+	svc.Logger.Infof("Send Internal Invoice: invoice_id:%v value:%v state:%v", invoice.ID, invoice.Amount, invoice.State)
 
 	// Get the user's current and incoming account for the transaction entry
 	recipientCreditAccount, err := svc.AccountFor(ctx, common.AccountTypeCurrent, incomingInvoice.UserID)
@@ -278,6 +279,7 @@ func (svc *LndhubService) PayInvoice(ctx context.Context, invoice *models.Invoic
 		svc.Logger.Errorf("Could not find outgoing account user_id:%v", userId)
 		return nil, err
 	}
+	svc.Logger.Infof("Pay Invoice: invoice_id:%v value:%v state:%v", invoice.ID, invoice.Amount, invoice.State)
 
 	entry := models.TransactionEntry{
 		UserID:          userId,
@@ -385,6 +387,7 @@ func (svc *LndhubService) HandleSuccessfulPayment(ctx context.Context, invoice *
 		svc.Logger.Errorf("Could not find fees account user_id:%v", invoice.UserID)
 		return err
 	}
+	svc.Logger.Infof("Update Fee account: invoice_id:%v value:%v state:%v", invoice.ID, invoice.Amount, invoice.State)
 
 	// add transaction entry for fee
 	entry := models.TransactionEntry{
