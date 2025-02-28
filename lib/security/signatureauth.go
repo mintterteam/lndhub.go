@@ -15,6 +15,8 @@ import (
 	"github.com/libp2p/go-libp2p/core/crypto"
 )
 
+const LEGACY_LOGIN_MESSAGE = "sign in into mintter lndhub"
+
 func SignatureMiddleware(loginMessage string) echo.MiddlewareFunc {
 	config := middleware.DefaultKeyAuthConfig
 	config.ErrorHandler = func(err error, c echo.Context) error {
@@ -104,7 +106,14 @@ func validateSignature(pubKeyStr, loginMessage string, c echo.Context) (bool, er
 		return false, fmt.Errorf("Unable to verify signature")
 	}
 	if !sig_ok {
-		return false, fmt.Errorf("signature and pubKey don't match")
+		//TODO(juligasa): remove this once the MTT migration is done.
+		sig_ok, err = pubKey.Verify([]byte(LEGACY_LOGIN_MESSAGE), signature)
+		if err != nil {
+			return false, fmt.Errorf("Unable to verify old signature")
+		}
+		if !sig_ok {
+			return false, fmt.Errorf("signature and pubKey don't match")
+		}
 	}
 
 	return true, nil
